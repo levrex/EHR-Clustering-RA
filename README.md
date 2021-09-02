@@ -5,6 +5,7 @@ Therefore, we aim to improve the understanding of RA by "unlocking" the wealth o
 
 ## Workflow
 ![alt text](https://github.com/levrex/EHR-Clustering-RA/blob/main/figures/md/fig2_workflow.png?raw=true)
+Workflow depicting the different steps of our pipeline. We start off with 25,933 dossiers of patients that visited the outpatient clinic, then we apply a patient selection whereby we request at a minimum follow-up of 1 year and a first visit after the initialization of HIX in 2011. Next, we feed the conclusion section - containing the physician’s verdict - to a Machine Learning Method to predict rheumatoid arthritis (RA) patients. We end up with the records of 928 RA-patients which are supplied to the EHR clustering pipeline, where we preprocess the different EHR-components and combine them in a shared latent space. We employ graph clustering on this feature space to stratify patients. Finally we elucidate the key features driving the clusters and we quantify the association between cluster membership and treatment efficacy.
 
 ## File details
 * `data/*`: All data is stored here (Excluded: sensitive data)
