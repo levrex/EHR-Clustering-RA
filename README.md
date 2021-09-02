@@ -7,6 +7,32 @@ Therefore, we aim to improve the understanding of RA by "unlocking" the wealth o
 ![alt text](https://github.com/levrex/EHR-Clustering-RA/blob/main/figures/md/fig2_workflow.png?raw=true)
 Workflow depicting the different steps of our pipeline. We start off with 25,933 dossiers of patients that visited the outpatient clinic, then we apply a patient selection whereby we request at a minimum follow-up of 1 year and a first visit after the initialization of HIX in 2011. Next, we feed the conclusion section - containing the physician’s verdict - to a Machine Learning Method to predict rheumatoid arthritis (RA) patients. We end up with the records of 928 RA-patients which are supplied to the EHR clustering pipeline, where we preprocess the different EHR-components and combine them in a shared latent space. We employ graph clustering on this feature space to stratify patients. Finally we elucidate the key features driving the clusters and we quantify the association between cluster membership and treatment efficacy.
 
+
+## Installation
+
+#### Windows systems:
+Prerequisite: Install [Anaconda](https://www.anaconda.com/distribution/) with python version 3.8+. This additionally installs the Anaconda Prompt, which you can find in the windows search bar. Use this Anaconda prompt to run the commands mentioned below.
+
+#### Linux / Windows (dev) systems:
+Prerequisite: [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html) environment (with jupyter notebook). Use the terminal to run the commands mentioned below.
+
+Install Jupyter Notebook:
+```sh
+$ conda install -c anaconda notebook
+```
+
+#### Install required modules
+Use pip to install the dependecies
+
+```sh
+$ pip install -r requirements.txt
+```
+
+## Where to start?
+- Start a notebook session in the terminal 
+- Open the first notebook : 
+[Notebook 1](notebooks/1_patient_selection.ipynb)
+
 ## File details
 * `data/*`: All data is stored here (Excluded: sensitive data)
 * `figures/*`: All figures of the project are stored here
@@ -28,8 +54,3 @@ Workflow depicting the different steps of our pipeline. We start off with 25,933
 * `src/3_clustering_scripts/*`: Features the R-scripts to run MOFA
 * `src/4_downstream/*`: Features scripts for downstream analysis to calculate the SHAP values & the LOESS curve
 * `TSNE/*`: The interactive TSNE plots are stored here
-
-## Where to start?
-- Start a notebook session in the terminal 
-- Open the first notebook : 
-[Notebook 1](notebooks/1_patient_selection.ipynb)
