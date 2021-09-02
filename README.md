@@ -16,7 +16,7 @@ Prerequisite: Install [Anaconda](https://www.anaconda.com/distribution/) with py
 #### Linux / Windows (dev) systems:
 Prerequisite: [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html) environment (with jupyter notebook). Use the terminal to run the commands mentioned below.
 
-Install Jupyter Notebook:
+#### Install Jupyter Notebook:
 ```sh
 $ conda install -c anaconda notebook
 ```
