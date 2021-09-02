@@ -4,7 +4,7 @@ Rheumatoid arthritis (RA) is an autoimmune disease that causes swelling and pain
 Therefore, we aim to improve the understanding of RA by "unlocking" the wealth of data available in the Electronic Health Records (EHR). We developed a pipeline that casts different EHR-layers, such as lab- and mannequin- data, into a shared latent space and performs clustering accordingly. Next, we compare the baseline characteristics and treatment response between the clusters.
 
 ## Workflow
-![alt text](https://github.com/levrex/EHR-Clustering-RA/blob/master/figures/md/fig2_workflow.png)
+![alt text](https://github.com/levrex/EHR-Clustering-RA/blob/main/figures/md/fig2_workflow.png?raw=true)
 
 ## File details
 * `data/*`: All data is stored here (Excluded: sensitive data)
