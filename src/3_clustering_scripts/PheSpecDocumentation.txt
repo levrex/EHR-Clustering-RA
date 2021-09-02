@@ -1,0 +1,255 @@
+#PheSpec documentation
+The basic approach behind the current version of PheSpecs is as follows:
+
+#Required packages for most extensive version
+ggplot2
+ggrepel
+grid
+gridExtra
+reshape2
+dplyr
+
+#Preparatory work
+-Some way to identify a group of individuals should exist
+
+ID	Code	Cluster
+x	A1		1
+x	A2		1
+x	A3		1
+y	A2		4
+.	.		.
+.	.		.
+.	.		.
+
+-For each group of individuals an expression vector should exist
+
+[[1]]
+A1	A2	A3	.	.	.
+0.3	0.1	0.9	.	.	.
+
+[[2]]
+A1	A2	A3	.	.	.
+0	0.4	0.7	.	.	.
+
+[[...]]]
+
+#Internal workings
+-A consistent colour palette is created for the code groupings (ICD chapters in our case)
+-The legend matching these colours to groupings is printed
+-The expression vector of the cluster being plotted is extracted to a dataframe
+-Matched to the desired strings and code groupings
+-Sorted on code grouping followed by code 
+-The top 500 codes are extracted from the plot dataframe
+
+-A matrix is constructed of the top 10 most frequent codes in the cluster
+-These are matched to the correct strings
+
+-A barplot is created of the plot dataframe
+-Bars represent the expression of the codes
+-Bars are coloured for the code groupings
+-The top 3 most expressed codes are labelled
+-Title of the plot contains the name of the cluster
+-Subtitle contains the size
+
+-The matrix is plotted besides the barplot
+
+-Usually a second combination follows the first on the same page
+-A version exists where just 1 PheSpec per page is constructed
+-Where a match between clusters is provided and the match is plotted in the same way as the first
+-Or where a combination of different sets are shown as miniature PheSpecs alongside a correlation table
+
+#Example script
+
+#Read function
+source("Functions.R")
+
+#Read code mapping file which contains colums "PheCode" "ICD" "Phenotype" "Category"
+phecodes_complete <- read.csv("/PHShome/mom41/Clustering/phecodes_complete.csv")
+
+#Read clustered data which contains colums "ID" "PheCode"
+dat <- get(load("/PHShome/mom41/Clustering/dat_clust.RData"))
+
+#Load ID dataset matching dataframe which contains colums "ID" "Set"
+load("id_set_match.RData")
+
+#Make sure PheCode and Cluster are factors so each cluster has all codes measured (even at 0)
+dat$PheCode <- as.factor(dat$PheCode)
+dat$Cluster <- as.factor(dat$Cluster)
+
+dat_uc <- unique(dat[,c("ID", "PheCode", "Cluster")])
+
+#Create list of expression vectors if it doesn't exist yet (in this case separate per dataset, so list of lists of vectors)
+if(file.exists("dat_em.RData")){
+ load("dat_em.RData")
+} else {
+  dat_em <- lapply(unique(id_set_match$Set), function(x){
+    lapply(unique(dat$Cluster), function(y){
+      tmp <- dat_uc[dat_uc$Cluster == y,]
+      tmp <- tmp[tmp$ID %in% id_set_match[id_set_match$Set == x, "ID"],]
+      table(tmp$PheCode)/length(unique(tmp$ID))
+    })
+  })
+  names(dat_em) <- unique(id_set_match$Set)
+  invisible(lapply(1:length(dat_em), function(x){
+    names(dat_em[[x]]) <<- unique(dat$Cluster) 
+  })
+  )
+  save(dat_em, file = "dat_em.RData")
+}
+
+#Set pdf width to something a bit wider than normal to accommodate the entire plot and table nicely
+pdf(file = paste0("/PHShome/mom41/Clustering/", format(Sys.Date(), "%Y%m%d"), "_phespecs.pdf"), width = 10)
+invisible(createPheSpec_multi(N = length(levels(dat$Cluster)), Clusters = levels(dat$Cluster), Dat = dat, EM = dat_em, Sets = id_set_match))
+dev.off()
+
+#Annotated function
+
+#N = number of PheSpecs to plot (max length of Clusters)
+#Clusters = vector of possible cluster indicators
+#Dat = clustered data as dataframe (minimal headers = "ID" and "Cluster")
+#EM = list of expression vectors (list names should be clusters, vector names should be codes)
+#Sets = dataframe matching ID's to different datasets (headers = "ID" and "Set")
+
+createPheSpec_multi <- function(N=1, Clusters, Dat, EM, Sets){
+#Create consistent palette of colours mapped to categories
+  col_rb <- c(rainbow(length(unique(phecodes_complete$Category))), "grey")
+  names(col_rb) <- c(unique(as.character(phecodes_complete$Category)), "Unknown")
+
+#Print legend once
+  plot.new()
+  legend(0.3,1, 
+         legend = c(levels(factor(phecodes_complete$Category, 
+                                levels = unique(phecodes_complete$Category))),
+                    "Unknown"), 
+         col = col_rb, 
+         lty = 1,
+         lwd = 2, 
+         cex = 1)
+         
+  col_sets <- rainbow(length(unique(Sets$Set)))
+  names(col_sets) <- unique(Sets$Set)
+  names(col_sets) <- names(col_sets)[order(names(col_sets), decreasing = T)]
+
+#Set some text size variables for the matrix later on
+  mytheme <- gridExtra::ttheme_default(
+    core = list(fg_params=list(cex = 0.6)),
+    colhead = list(fg_params=list(cex = 0.6)),
+    rowhead = list(fg_params=list(cex = 0.6)))
+
+#Per cluster create a page in the pdf	
+  invisible({
+    lapply(1:min(c(N, length(Clusters))), function(x){
+#Print which one we're at (mostly for debugging purposes)
+    print(paste0("Creating PheSpec for Cluster ", Clusters[x]))
+#Take the relevant subset of the data
+    Sub <- Dat[Dat$Cluster == as.character(Clusters[x]),]
+    Sub <- Sub[!duplicated(Sub$ID),]
+
+#Determine the top contributing dataset based on size    
+    Size <- nrow(Sub)
+    
+    Sizes <- table(Sets[Sets$ID %in% Sub$ID, "Set"])
+    TopSet <- names(Sizes[order(Sizes, decreasing = T)])[1]
+
+#For the top dataset extract the expression vector for this cluster	
+    PlotDF <- data.frame(EM[[TopSet]][[as.character(Clusters[x])]])
+#Merge with the PheCode mapping
+    PlotDF <- merge(PlotDF, phecodes_complete[!duplicated(phecodes_complete$PheCode),c("PheCode", "Phenotype", "Category")], by.x = 1, by.y = "PheCode", all.x = T)
+    colnames(PlotDF) <- c("Code", "Freq", "Label", "Cat")
+#Add an "Unknown" label instead of NA to prevent ggplot from dropping them
+    PlotDF$Code <- as.character(PlotDF$Code)
+    PlotDF$Cat <- as.character(PlotDF$Cat)
+    PlotDF[is.na(PlotDF$Cat), "Cat"] <- "Unknown"
+	PlotDF$Label <- as.character(PlotDF$Label)
+#Order the data on category and code in the same order as the legend, then fix them as factors to make ggplot follow the order
+    PlotDF <- PlotDF[order(match(PlotDF$Cat, c(unique(as.character(phecodes_complete$Category)), "Unknown")), PlotDF$Code),]
+    PlotDF$Cat <- factor(PlotDF$Cat, levels = c(unique(as.character(phecodes_complete$Category)), "Unknown"))
+    PlotDF$Code <- factor(PlotDF$Code, levels = unique(PlotDF$Code))   
+
+#Create top 10 most frequent codes table    
+    Mat <- PlotDF[order(PlotDF$Freq, decreasing = T), c("Code", "Freq", "Label")][1:10,]
+    Mat <- Mat[,c("Code", "Freq", "Label")]
+    Mat$Freq <- round(as.numeric(Mat$Freq), digits = 2)
+#Abbreviate strings above 43 characters
+    Mat$Label <- ifelse(nchar(Mat$Label) > 43, paste0(substring(Mat$Label, 1, 40), "..."), Mat$Label)
+#Turn table into a grob
+    m1 <- tableGrob(Mat, rows = NULL, theme = mytheme)
+
+#Extract just the top 500 most frequent codes    
+    included_codes <- PlotDF
+    included_codes <- included_codes[order(included_codes$Freq, decreasing = T),]
+    included_codes <- included_codes[1:500, "Code"]
+    
+    PlotDF <- PlotDF[PlotDF$Code %in% included_codes,]
+
+#Extract the expression vector of this cluster for all sets    
+    RestSets <- sapply(EM, `[`, as.character(Clusters[x]))
+    names(RestSets) <- gsub("\\..*", "", names(RestSets))
+#Calculate the correlation between the top set and all sets
+    Cors <- sapply(1:length(RestSets), function(y){
+      cor(RestSets[[TopSet]], RestSets[[y]])
+    })
+    names(Cors) <- names(RestSets
+	
+#Create table containing size and correlation of each set
+    SetMat <- data.frame(Size = as.vector(Sizes[names(RestSets)]),
+                         Cor = round(Cors, 2),
+                         Set = names(RestSets))
+    SetMat <- SetMat[order(SetMat$Set),]
+#Turn table into a grob
+    m2 <- tableGrob(SetMat, rows = NULL, theme = mytheme)
+
+#Create a dataframe for the miniatures the same way as done above (but smaller)    
+    SetPlot <- melt(do.call("rbind", RestSets))
+    colnames(SetPlot) <- c("Set", "Code", "Freq")
+    SetPlot <- SetPlot[SetPlot$Code %in% included_codes,]
+    SetPlot <- SetPlot[order(match(SetPlot$Code, levels(PlotDF$Code))),]
+    SetPlot$Code <- factor(SetPlot$Code, levels = unique(SetPlot$Code))
+    SetPlot <- SetPlot[order(as.character(SetPlot$Set), decreasing = F),]
+    SetPlot$Set <- factor(SetPlot$Set, levels = unique(SetPlot$Set))
+
+#Create main PheSpec	
+	  p1 <- ggplot(PlotDF, aes(x = Code, y = Freq, fill = Cat, label = Label)) +
+		geom_bar(stat = "identity") +
+		scale_fill_manual(values = col_rb) +
+		theme_classic() +
+		theme(axis.ticks.x = element_blank(),
+			  axis.text.x = element_blank(),
+			  legend.position = "none") +
+		scale_y_continuous(expand = c(0,0),
+                       limits = c(0,1.2)) +
+		labs(title = paste0(TopSet, " Cluster ", Clusters[x]),
+			 subtitle = paste0("N = ", Size),
+			 x = "PheCode",
+			 y = "Frequency") +
+		geom_label_repel(data = subset(PlotDF, Freq >= sort(PlotDF$Freq, decreasing = T)[3]),
+                     segment.size  = 0.2,
+                     segment.color = "grey50",
+                     segment.alpha = 0.5,
+                     nudge_y = 0.2,
+                     direction = "y",
+                     size = 5)
+
+#Create miniatures					 
+    p2 <- ggplot(SetPlot, aes(x = Code, y = Freq, fill = Set)) +
+    geom_bar(stat = "identity") +
+    facet_wrap(~Set) +
+    scale_fill_manual(values = col_sets) +
+    theme_classic() +
+    theme(axis.ticks.x = element_blank(),
+          axis.text.x = element_blank(),
+          legend.position = "none") +
+    scale_y_continuous(expand = c(0,0),
+                       limits = c(0,1.2)) +
+    labs(title = paste0("Remaining Datasets Cluster ", Clusters[x]),
+         x = "PheCode",
+         y = "Frequency")
+
+#Arrange the 2 graphs and 2 tables unto 1 page with a bit of padding in the middle		 
+	  grid.arrange(p1, grid.rect(gp=gpar(col="white")), m1,
+                 p2, grid.rect(gp=gpar(col="white")), m2,
+                 nrow = 2, ncol = 3,
+                 widths = c(2,0.05,0.9))
+    })
+  })
+}
