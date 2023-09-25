@@ -5,7 +5,7 @@ Therefore, we aim to refine the taxonomy of RA by "unlocking" the wealth of data
 
 ![alt text](https://github.com/levrex/EHR-Clustering-RA/blob/main/figures/md/fig3_SHAP_ClusterOverview.png?raw=true)
 
-We identified four different RA subsets: 1) arthritis in feet, 2) seropositive oligo-articular disease, 3) seronegative hand arthritis, 4) polyarthritis. We conducted sensitivity analysis, external validation and 1000 times bootstrapping to ensure that our clusters were valid, generalizable and stable.
+Note: we used this pipeline for our study, of which you can find a preprint here: https://doi.org/10.1101/2023.09.19.23295482. We identified four different RA subsets: 1) arthritis in feet, 2) seropositive oligo-articular disease, 3) seronegative hand arthritis, 4) polyarthritis. We conducted sensitivity analysis, external validation and 1000 times bootstrapping to ensure that our clusters were valid, generalizable and stable.
 
 ## Workflow
 ![alt text](https://github.com/levrex/EHR-Clustering-RA/blob/main/figures/md/fig2_workflow.png?raw=true)
@@ -15,7 +15,7 @@ Workflow depicting the different steps of our pipeline. We start off with 25,000
 To ensure the robustness of our findings, we tested a) cluster stability (1000 fold) b) physician confounding, c) association with remission and methotrexate failure and d) generalizability to a second different data set (Leiden Early Arthritis clinic; n=769).
 
 ### Replication in a second dataset
-We replicated the clustering and the downstream analysis (SHAP & survival analysis) in an seperate independent dataset for external validation. To investigate the replicability of the clustering we projected our novel patients unto our learned patient embedding, and assigned them to a cluster based on their orientation with respect to the old data. This projection was achieved with ![alt text]POODLE(https://github.com/levrex/Poodle)
+We replicated the clustering and the downstream analysis (SHAP & survival analysis) in an seperate independent dataset for external validation. To investigate the replicability of the clustering we projected our novel patients unto our learned patient embedding, and assigned them to a cluster based on their orientation with respect to the old data. This projection was achieved with [POODLE](https://github.com/levrex/Poodle)
 
 ## Installation
 
@@ -69,4 +69,5 @@ $ pip install -r requirements.txt
 * `src/3_downstream/*`: Features scripts for downstream analysis like Bootstrapping or SHAP experiment
 * `TSNE/*`: The interactive TSNE plots are stored here (Blinded)
 
-
+## Contact
+If you experience difficulties with implementing the pipeline or if you have any other questions feel free to send me an e-mail. You can contact me on: t.d.maarseveen@lumc.nl
