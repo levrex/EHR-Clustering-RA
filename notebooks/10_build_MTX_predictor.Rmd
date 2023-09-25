@@ -1,0 +1,572 @@
+---
+title: "Build MTX predictor"
+author: "Tjardo M"
+date: "31-01-2023"
+output: html_document
+---
+
+Initialize working environment
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/exports/reum/tdmaarseveen/EHR-Clustering-RA")
+
+# Set library folder
+.libPaths("/exports/reum/tdmaarseveen/Rlibs")
+remove.packages("rlang", lib.loc = .libPaths()[x])
+
+setwd("/exports/reum/tdmaarseveen/EHR-Clustering-RA")
+getwd()
+```
+
+## #1: Plot missingness [Unused]
+
+## #1.1 Import lab data
+
+```{r}
+library("mice")
+library("tidyverse")
+library(readr)
+library(VIM)
+
+df_lab <- read_delim("new_data/3_wide/DF_Lab_wide_Final_wManRX.csv", "|", escape_double = FALSE, trim_ws = TRUE)
+
+colnames(df_lab) <- c("pseudoId", "MCV", "Ht","Leuko", "MCHC", "MCH",  "BSE", "Hb", "Trom", "aCCP", "RF", 'Age', 'Sex', "Mannequin") # , "Man" , "Rx"
+#head(df_lab)
+
+plot_missing(df_lab, "LAB")
+```
+
+## #2: Survival analysis
+
+### #2.1: Import data
+
+Import survival data that we generated in notebook 7 (7_survival_analysis.ipynb) at step #7.2.3
+
+```{r}
+library("readr")
+library(reticulate)
+
+# Initalize conda environment w/ required python packages
+use_condaenv("convae_architecture/envs", required=TRUE)
+
+# Import survival data (generate in #7.2.3 7_survival_analysis.ipynb)
+df_survival <- as.data.frame(read_csv("new_data/5_clustering/df_survivaldata_mmae.csv", col_types = cols(...1 = col_skip())))
+head(df_survival)
+```
+
+### #2.2 Render Kaplan-Meier curve for 1 year
+```{r}
+library(survival)
+library(survminer)
+library("ggpubr")       # for ggarrange
+
+df_survival$aCCP <- as.integer(df_survival$aCCP)
+df_survival$Cluster <- as.factor(df_survival$Cluster)
+df_survival$time <- as.integer(df_survival$time) 
+df_survival$event_1y <- as.integer(df_survival$event_1y) 
+df_survival$MannTillTreat <- as.integer(df_survival$MannTillTreat) 
+```
+
+```{r}
+
+
+# Cluster+
+fitLC  <- survfit(Surv(time, event_1y) ~ Cluster, data = df_survival)
+
+p1 <- ggsurvplot(fitLC
+             , data = df_survival
+             , risk.table = TRUE
+             , conf.int=TRUE
+             , pval = TRUE
+             , break.x.by = 61
+             , break.time.by= 61
+             , xlab ="Time in Months"
+             # , xlim = c(0, 60)        ## commented out !
+             , ylab="% of patients still on initial MTX"
+             , ggtheme = theme_minimal()
+             , risk.table.y.text.col = T
+             , risk.table.y.text = FALSE
+             , risk.table.fontsize = 2
+              , cumevents = TRUE
+              , cumevents.fontsize =2   
+             
+             )
+
+### save parts of the original graph    
+surv_plot <- p1$plot
+surv_table <- p1$table# +
+
+### zoom in on the surv_plot    
+surv_plot2 <- surv_plot + coord_cartesian(xlim = c(0,366), ylim = c(0.5,1.0))
+surv_table <- surv_table + coord_cartesian(xlim = c(0,366))
+
+### put it back together
+ggarrange(surv_plot2, surv_table, ncol = 1, heights = c(3, 2))
+
+# Save figure
+ggsave("figures/5_treatment/survival_1y.png")
+ggsave("figures/5_treatment/survival_1y.pdf")
+#surv_plot2
+#+ coord_cartesian(xlim=c(0, 365))#  xlim=c(0, 365),
+
+```
+
+### Check for aCCP stratification
+
+```{r}
+
+
+# Cluster+
+fitLC  <- survfit(Surv(time, event_1y) ~ Cluster+aCCP, data = df_survival)
+
+p1 <- ggsurvplot(fitLC
+             , data = df_survival
+             , risk.table = TRUE
+             , conf.int=TRUE
+             , pval = TRUE
+             , break.x.by = 61
+             , break.time.by= 61
+             , xlab ="Time in Months"
+             # , xlim = c(0, 60)        ## commented out !
+             , ylab="% of patients still on initial MTX"
+             , ggtheme = theme_minimal()
+             , risk.table.y.text.col = T
+             , risk.table.y.text = FALSE
+             , risk.table.fontsize = 2
+              , cumevents = TRUE
+              , cumevents.fontsize =2   
+             
+             )
+
+### save parts of the original graph    
+surv_plot <- p1$plot
+surv_table <- p1$table# +
+
+### zoom in on the surv_plot    
+surv_plot2 <- surv_plot + coord_cartesian(xlim = c(0,366), ylim = c(0.5,1.0))
+surv_table <- surv_table + coord_cartesian(xlim = c(0,366))
+
+### put it back together
+ggarrange(surv_plot2, surv_table, ncol = 1, heights = c(3, 1))
+
+# Save figure
+ggsave("figures/5_treatment/survival_1y_aCCPstrat.png")
+ggsave("figures/5_treatment/survival_1y_aCCPstrat.pdf")
+#surv_plot2
+#+ coord_cartesian(xlim=c(0, 365))#  xlim=c(0, 365),
+
+```
+
+### #2.3 Study interaction 
+```{r}
+library(survival)
+fit1 <- coxph(Surv(time, event_1y) ~ Cluster + diseaseDuration , # + Age 
+ data = df_survival)
+
+fit2 <- coxph(Surv(time, event_1y) ~ Cluster*diseaseDuration , # + Age 
+ data = df_survival)
+ 
+anova(fit1,fit2,test="Chisq")
+```
+```{r}
+library(survival)
+fit1 <- coxph(Surv(time, event_1y) ~ Cluster + Sex , # + Age 
+ data = df_survival)
+
+fit2 <- coxph(Surv(time, event_1y) ~ Cluster*Sex , # + Age 
+ data = df_survival)
+ 
+anova(fit1,fit2,test="Chisq")
+```
+
+### #2.3 Calculate p-val for trend
+
+```{r}
+surv_pvalue(fitLC)
+```
+
+## #2.4 Check for remission
+```{r}
+
+# Import survival data (generate in #7.2.3 7_survival_analysis.ipynb)
+df_survival <- as.data.frame(read_csv("new_data/5_clustering/df_survivaldata_mmae_Remission_setB.csv", col_types = cols(...1 = col_skip()))) # df_survivaldata_mmae_Remission_setB
+head(df_survival)
+```
+
+### #2.2 Render Kaplan-Meier curve for 1 year
+
+```{r}
+library(survival)
+library(survminer)
+library("ggpubr")       # for ggarrange
+
+df_survival$Cluster <- as.factor(df_survival$Cluster)
+df_survival$time <- as.integer(df_survival$time_till_Rem) 
+df_survival$event_Rem <- as.integer(df_survival$event_1y_Rem) 
+
+
+fitLC  <- survfit(Surv(time, event_Rem) ~ Cluster, data = df_survival)
+
+p1 <- ggsurvplot(fitLC
+             , data = df_survival
+             , risk.table = TRUE
+             , conf.int=TRUE
+             , pval = TRUE
+             , break.x.by = 100
+             , break.time.by= 100
+             , xlab ="Time in Months"
+             # , xlim = c(0, 60)        ## commented out !
+             , ylab="% of patients still on initial MTX"
+             , ggtheme = theme_minimal()
+             , risk.table.y.text.col = T
+             , risk.table.y.text = FALSE
+             , risk.table.fontsize = 2
+              , cumevents = TRUE
+              , cumevents.fontsize =2   
+             
+             )
+
+### save parts of the original graph    
+surv_plot <- p1$plot
+surv_table <- p1$table# +
+
+### zoom in on the surv_plot    
+surv_plot2 <- surv_plot + coord_cartesian(xlim = c(0,365), ylim = c(0.5,1.0))
+surv_table <- surv_table + coord_cartesian(xlim = c(0,365))
+
+### put it back together
+ggarrange(surv_plot2, surv_table, ncol = 1, heights = c(3, 1))
+
+# Save figure
+ggsave("figures/5_treatment/survival_1y_Remission.png")
+ggsave("figures/5_treatment/survival_1y_Remission.pdf")
+#surv_plot2
+#+ coord_cartesian(xlim=c(0, 365))#  xlim=c(0, 365),
+
+```
+
+### #2.6 Calculate p-val for trend w/ Remission
+
+```{r}
+surv_pvalue(fitLC)
+```
+
+## #3. Check for confounding physician
+
+Import composite table with survival + metadata that we generated in notebook 9 (offshoots/9_Downstream_Treatment_analysis.ipynb) at step #2.3
+
+```{r}
+## Import EHR scaled data
+library("readr")
+
+df_ehr_scaled <- read_delim("new_data/offshoots/df_ehr_scaled_withOutcome_woCounts.csv", delim = "|", escape_double = FALSE, trim_ws = TRUE)
+head(df_ehr_scaled)
+
+
+df_ehr_remission  <- read_delim("new_data/offshoots/df_ehr_REMISSION.csv", delim = "|", escape_double = FALSE, trim_ws = TRUE)
+head(df_ehr_remission)
+
+```
+
+```{r}
+df_ehr_scaled$succes_1y <- +(!df_ehr_scaled$event_1y) 
+```
+
+### #3.1 Calculate the LISI score
+
+We wanted to ensure that the clusters were not biased for certain physicians. Therefore, we rendered a LISI-density plot to show the diversity of physicians near the average patient , see figure x11. ('LISI' stands for Local Inverse Simpsons index)
+
+```{r}
+library(lisi)
+library(ggplot2)
+library(hrbrthemes)
+
+Z <- subset(df_ehr_scaled, select=c(LF_0:LF_7)) 
+meta_data <- subset(df_ehr_scaled, select=c(patnr:FinalTreatment, Physician))
+meta_data$PHYSICIAN <- as.factor(meta_data$Physician) 
+meta_data$Cluster <- as.factor(meta_data$Cluster) 
+
+res <- compute_lisi(Z, meta_data, c('PHYSICIAN')) 
+meta_data$PHYSICIAN_SCORE <- unlist(res)
+
+# Visualize LISI distribution
+p2 <- ggplot(data=meta_data, aes(x=PHYSICIAN_SCORE, group=Cluster, fill=Cluster)) +
+    geom_density(adjust=1.5, alpha=.4) +
+    theme_ipsum()
+
+p2
+```
+
+## #4 Examine predictive ability of clusters for MTX response
+
+### #4.1 Select MTX starters
+
+```{r}
+
+newdata <- as.data.frame(df_ehr_scaled[ which(df_ehr_scaled$`MTX-starter`==TRUE ),])
+```
+
+### #4.2 Create subsets for the different 'models'
+
+```{r}
+
+# MODEL A
+X_A <- newdata[, c("RF_x", "aCCP_x", "Age_y", "Sex_x", "SJC", "TJC", "BSE_x",  "succes_1y")] 
+
+# MODEL B
+X_B <- newdata[, c("RF_x", "aCCP_x", "Age_y", "Sex_x", "SJC", "TJC", "BSE_x", "Cluster1", "Cluster2", "Cluster3", "Cluster4",  "succes_1y")] # "FEETcount", "HANDcount",
+
+# MODEL C
+X_C <- newdata[, c("RF_x", "aCCP_x", "Age_y", "Sex_x", "SJC", "TJC", "BSE_x", "FEETcount", "HANDcount",  "succes_1y")] # "FEETcount", "HANDcount
+
+# MODEL D
+X_D <- newdata[, c("RF_x", "aCCP_x", "Age_y", "Sex_x", "SJC", "TJC", "BSE_x", "FEETcount", "HANDcount", "Cluster1", "Cluster2", "Cluster3", "Cluster4",  "succes_1y")] # "FEETcount", "HANDcount
+
+
+# Only cluster variables
+X_clusterOnly <- newdata[, c("Cluster1", "Cluster2", "Cluster3", "Cluster4", "succes_1y")]
+
+X_handOnly <- newdata[, c("HANDcount", "succes_1y")]
+
+X_feetOnly <- newdata[, c("FEETcount", "succes_1y")]
+
+# Only use aCCP as predictor
+X_aCCPOnly <- newdata[, c("aCCP_x",  "succes_1y")]
+
+# Only use ESR  as predictor
+X_ESROnly <- newdata[, c("BSE_x", 'succes_1y')]
+
+# Only use ESR  as predictor
+X_SexOnly <- newdata[, c("Sex_x", 'succes_1y')]
+
+# Only use DAS as predictor
+X_DASOnly <- newdata[, c("DAS28(3)",  "succes_1y")]
+```
+
+### #4.3 Create the different predictive models
+
+```{r}
+#model
+model_A <- glm(succes_1y ~ ., data = X_A, family = "binomial")
+model_B <- glm(succes_1y ~ . , data = X_B, family = "binomial")
+model_C <- glm(succes_1y ~ . , data = X_C, family = "binomial")
+model_D <- glm(succes_1y ~ . , data = X_D, family = "binomial")
+
+cluster_model <-  glm(succes_1y ~ ., data = X_clusterOnly, family = "binomial")
+aCCP_model <-  glm(succes_1y ~ ., data = X_aCCPOnly, family = "binomial")
+ESR_model <-  glm(succes_1y ~ ., data = X_ESROnly, family = "binomial")
+Sex_model <-  glm(succes_1y ~ ., data = X_SexOnly, family = "binomial")
+DAS_model <-  glm(succes_1y ~ ., data = X_DASOnly, family = "binomial")
+null_model <- glm(succes_1y ~ 1, data = X, family = "binomial")
+
+#hand_model <-  glm(succes_1y ~ ., data = X_handOnly, family = "binomial")
+#feet_model <-  glm(succes_1y ~ ., data = X_feetOnly, family = "binomial")
+```
+
+### #4.4 Calculate additive value of the different models
+
+```{r}
+cat(paste("Calculate MacPhadden", "\n", 
+      "Additive value of aCCP (Expl. var): ", 1-(logLik(aCCP_model)/logLik(null_model)), '\n',
+      "Additive value of DAS (Expl. var): ", 1-(logLik(DAS_model)/logLik(null_model)), '\n',
+      "Additive value of Sex (Expl. var): ", 1-(logLik(Sex_model)/logLik(null_model)), '\n',
+      "Additive value of ESR (Expl. var): ", 1-(logLik(ESR_model)/logLik(null_model)), '\n',
+      "Additive value of hand count (Expl. var): ", 1-(logLik(hand_model)/logLik(null_model)), '\n',
+      "Additive value of feet count (Expl. var): ", 1-(logLik(feet_model)/logLik(null_model)), '\n',
+      "Additive value of basemodel (Expl. var): ", 1-(logLik(base_model)/logLik(null_model)), '\n',
+      "Additive value of original basemodel (Expl. var): ", 1-(logLik(base_model_old)/logLik(null_model)), '\n',
+      "Additive value of clusterinfo alone (Expl. var): ", 1-(logLik(cluster_model)/logLik(null_model)), '\n',
+      "Additive value of basemodel + cluster info (Expl. var): ", 1-(logLik(model)/logLik(null_model)), '\n',
+      "Additive value of clusterinfo vs basemodel (Expl. var): ", 1-(logLik(model_B)/logLik(model_A))))
+```
+
+### #4.5 Calculate performance of model B
+
+```{r}
+library(broom)
+require(MASS)
+library(dplyr)
+
+dt <- as.data.frame(exp(confint(model_B, level = 0.95))) # exp(coef(model))
+dt$odds <- exp(coef(model_B))
+
+# ALL
+write.csv( tidy(model_B) %>% as.data.frame() %>%
+  mutate(across(everything(), format, decimal.mark = ",")) %>% format(scientific=FALSE , digits = 3) , "results/treatmentResponse/coefs.csv")
+write.csv( dt %>% as.data.frame() %>%
+  mutate(across(everything(), format, decimal.mark = ",")) %>% format(scientific=FALSE , digits = 3), "results/treatmentResponse/odds.csv")
+write.csv( glance(model_B ) %>% as.data.frame() %>%
+  mutate(across(everything(), format, decimal.mark = ",")) %>% format(scientific=FALSE , digits = 3) , "results/treatmentResponse/an.csv")
+
+summary(model_B)
+```
+
+### #4.5 Calculate performance of model C
+
+```{r}
+library(broom)
+require(MASS)
+library(dplyr)
+
+dt <- as.data.frame(exp(confint(model_C, level = 0.95))) # exp(coef(model))
+dt$odds <- exp(coef(model_C))
+
+# ALL
+write.csv( tidy(model_C) %>% as.data.frame() %>%
+  mutate(across(everything(), format, decimal.mark = ",")) %>% format(scientific=FALSE , digits = 3) , "results/treatmentResponse/coefs.csv")
+write.csv( dt %>% as.data.frame() %>%
+  mutate(across(everything(), format, decimal.mark = ",")) %>% format(scientific=FALSE , digits = 3), "results/treatmentResponse/odds.csv")
+write.csv( glance(model_C ) %>% as.data.frame() %>%
+  mutate(across(everything(), format, decimal.mark = ",")) %>% format(scientific=FALSE , digits = 3) , "results/treatmentResponse/an.csv")
+
+summary(model_C)
+```
+
+### #4.5 Calculate performance of model D
+```{r}
+library(broom)
+require(MASS)
+library(dplyr)
+
+dt <- as.data.frame(exp(confint(model_D, level = 0.95))) # exp(coef(model))
+dt$odds <- exp(coef(model_D))
+
+# ALL
+write.csv( tidy(model_D) %>% as.data.frame() %>%
+  mutate(across(everything(), format, decimal.mark = ",")) %>% format(scientific=FALSE , digits = 3) , "results/treatmentResponse/coefs.csv")
+write.csv( dt %>% as.data.frame() %>%
+  mutate(across(everything(), format, decimal.mark = ",")) %>% format(scientific=FALSE , digits = 3), "results/treatmentResponse/odds.csv")
+write.csv( glance(model_D ) %>% as.data.frame() %>%
+  mutate(across(everything(), format, decimal.mark = ",")) %>% format(scientific=FALSE , digits = 3) , "results/treatmentResponse/an.csv")
+
+summary(model_D)
+```
+
+### #4.6 Test if adding clusters to benchmark results in better model
+
+
+```{r}
+anova(base_model_old, model, test = "Chisq")
+
+```
+### #4.7 Check if hand & cluster model are similar
+
+```{r}
+anova(model_B, model_C, test = "Chisq")
+
+```
+
+
+```{r}
+anova(hand_model, cluster_model, test = "Chisq")
+
+```
+
+### 4.8 Ensure association of clusters are not biased 
+```{r}
+library(broom)
+require(MASS)
+library(dplyr)
+library(tidyverse)
+
+X <- as.data.frame(df_survival[ which(df_survival$`MTX-starter`==TRUE ),])
+
+X$succes_1y <- +(!X$event_1y)
+clust_model <-  glm(succes_1y ~ Cluster1 + Cluster2 + Cluster3 + Cluster4, data = X, family = "binomial")
+extra_model <- glm(succes_1y ~ MannTillTreat + SJC + TJC + aCCP + diseaseDuration + symptomDuration + Cluster1 + Cluster2 + Cluster3 + Cluster4, data = X, family = "binomial")
+
+dt <- as.data.frame(exp(confint(extra_model, level = 0.95))) # exp(coef(model))
+dt$odds <- exp(coef(extra_model))
+
+# ALL
+write.csv( tidy(extra_model) %>% as.data.frame() %>%
+  mutate(across(everything(), format, decimal.mark = ",")) %>% format(scientific=FALSE , digits = 3) , "results/treatmentResponse/checkBias_coefs.csv")
+write.csv( dt %>% as.data.frame() %>%
+  mutate(across(everything(), format, decimal.mark = ",")) %>% format(scientific=FALSE , digits = 3), "results/treatmentResponse/checkBias_odds.csv")
+write.csv( glance(extra_model ) %>% as.data.frame() %>%
+  mutate(across(everything(), format, decimal.mark = ",")) %>% format(scientific=FALSE , digits = 3) , "results/treatmentResponse/checkBias_an.csv")
+
+
+summary(extra_model)
+```
+
+### 5. Infer statistical significance at baseline between two populations
+
+```{r}
+library(readr)
+
+df_lab <- read_delim("new_data/7_final/BaselinePopulation_TOTAL.csv", ";", escape_double = FALSE, trim_ws = TRUE)
+df_lab
+```
+
+
+### 6. Fit remission model
+#### 6.1 Select 
+```{r}
+newdata2 <- as.data.frame(df_ehr_remission[,])
+
+# MODEL A
+X_A <- newdata2[, c("RF", "aCCP", "Age", "Sex", "SJC", "TJC", "BSE",  "event_1y_Rem")] 
+
+# MODEL B
+X_B <- newdata2[, c("RF", "aCCP", "Age", "Sex", "SJC", "TJC", "BSE","Cluster1", "Cluster2", "Cluster3", "Cluster4",  "event_1y_Rem")] # "FEETcount", "HANDcount",
+
+# Only clusters
+X_clusterOnly <- newdata2[, c("Cluster1", "Cluster2", "Cluster3", "Cluster4", "event_1y_Rem")]
+
+model_A <- glm(event_1y_Rem ~ ., data = X_A, family = "binomial")
+model_B <- glm(event_1y_Rem ~ . , data = X_B, family = "binomial")
+model_cluster <- glm(event_1y_Rem ~ . , data = X_clusterOnly, family = "binomial")
+
+null_model <- glm(event_1y_Rem ~ 1, data = X_A, family = "binomial")
+
+aCCP_model <- glm(event_1y_Rem ~ aCCP, data = X_A, family = "binomial")
+RF_model <- glm(event_1y_Rem ~ RF, data = X_A, family = "binomial")
+Age_model <- glm(event_1y_Rem ~ Age, data = X_A, family = "binomial")
+ESR_model <- glm(event_1y_Rem ~ BSE, data = X_A, family = "binomial")
+SJC_model <- glm(event_1y_Rem ~ SJC, data = X_A, family = "binomial")
+TJC_model <- glm(event_1y_Rem ~ TJC, data = X_A, family = "binomial")
+Sex_model <- glm(event_1y_Rem ~ Sex, data = X_A, family = "binomial")
+
+cat(paste("Calculate MacPhadden", "\n", 
+      "Additive value of model A (Expl. var): ", 1-(logLik(model_A)/logLik(null_model)), '\n',
+      "Additive value of model B (Expl. var): ", 1-(logLik(model_B)/logLik(null_model)), '\n',
+      "Additive value of RF (Expl. var): ", 1-(logLik(RF_model)/logLik(null_model)), '\n',
+      "Additive value of aCCP (Expl. var): ", 1-(logLik(aCCP_model)/logLik(null_model)), '\n',
+      "Additive value of Age (Expl. var): ", 1-(logLik(Age_model)/logLik(null_model)), '\n',
+      "Additive value of BSE (Expl. var): ", 1-(logLik(ESR_model)/logLik(null_model)), '\n',
+      "Additive value of SJC (Expl. var): ", 1-(logLik(SJC_model)/logLik(null_model)), '\n',
+      "Additive value of TJC (Expl. var): ", 1-(logLik(TJC_model)/logLik(null_model)), '\n',
+      "Additive value of Sex (Expl. var): ", 1-(logLik(Sex_model)/logLik(null_model)), '\n',
+      "Additive value of clustermodel (Expl. var): ", 1-(logLik(model_cluster)/logLik(null_model))))
+
+```
+
+### #6.2 Calculate performance of model B
+
+```{r}
+library(broom)
+require(MASS)
+library(dplyr)
+
+dt <- as.data.frame(exp(confint(model_B, level = 0.95))) # exp(coef(model))
+dt$odds <- exp(coef(model_B))
+
+# ALL
+write.csv( tidy(model_B) %>% as.data.frame() %>%
+  mutate(across(everything(), format, decimal.mark = ",")) %>% format(scientific=FALSE , digits = 3) , "results/treatmentResponse/coefs.csv")
+write.csv( dt %>% as.data.frame() %>%
+  mutate(across(everything(), format, decimal.mark = ",")) %>% format(scientific=FALSE , digits = 3), "results/treatmentResponse/odds.csv")
+write.csv( glance(model_B ) %>% as.data.frame() %>%
+  mutate(across(everything(), format, decimal.mark = ",")) %>% format(scientific=FALSE , digits = 3) , "results/treatmentResponse/an.csv")
+
+summary(model_B)
+```
+### #6.3 Test if adding clusters to benchmark results in better model
+
+```{r}
+anova(model_B, model_A, test = "Chisq")
+#anova(model_cluster, null_model, test = "Chisq")
+
+```

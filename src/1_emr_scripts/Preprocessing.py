@@ -2,24 +2,196 @@ import re
 import math
 import numpy as np
 import pandas as pd
-import bokeh.plotting as bp
-from bokeh.models import HoverTool, BoxSelectTool, CustomJS, Panel, DataTable, ColumnDataSource, Tabs, TableColumn
-from bokeh.plotting import figure, show,  output_notebook
-from bokeh.layouts import row, column, gridplot
-from bokeh.transform import factor_cmap
-from bokeh.models import  CategoricalColorMapper, LinearColorMapper, Select,  Slider
-from bokeh.io import output_file, show
-import bokeh.io as bio
 from sklearn.manifold import TSNE
 from sklearn.cluster import KMeans
-from sklearn.decomposition import PCA
-from sklearn.decomposition import FactorAnalysis
 import matplotlib.pyplot as plt
 from numpy.linalg import norm
-import umap
+#import umap
+import unicodedata
 import pattern.nl as patNL
 import pattern.de as patDE
 import pattern.en as patEN
+
+
+
+def getStartTreatmentDate(df_med, d_pseudo_pat, d_pseudo_date, no_drug_window=6):
+    """  
+    Description:
+    This function extracts the date where a patient takes medication for the first time
+    (after the first consult)
+    
+    Input:
+        df_med = dataframe with medicator information
+        d_pseudo_pat = dictionary whereby pseudo ids are linked to patient ids 
+        d_pseudo_date = dictionary whereby pseudo ids are linked to the first consult date
+        no_drug_window = ensure there is no drug prior to the picked baseline (default = 6 months)
+            - Otherwise, it is no true baseline because the our measures are then biased by
+                drug interference
+    Output:
+        df_treat = dataframe with the date of the first treatment after the specified date of baseline
+    """
+    c_close = 0
+    def nearestTreatment_LookBehind(items, pivot):
+        
+        items = [item for item in items if item < pd.to_datetime(pivot, format='%Y-%m-%d', errors='ignore') ]
+        #print(items)
+        if items == []:
+            return np.nan
+        else : 
+            return min(items, key=lambda x: abs(x - pivot))
+    
+    df_treat = pd.DataFrame(columns=['pseudoId', 'patnr', 'index', 'Drug', 'Instruction', 'FirstConsult', 'Lookahead_Treatment', 'Lookbehind_Treatment', 'Lookahead_Prednison', 'Lookahead_DMARD', 'FILTER_RX_NA', 'FILTER_RX_NA_BASELINE']) 
+    
+    
+    for pid in d_pseudo_pat.keys():
+        no_med = True # register if medication is found
+        missing_baseline = False
+        pat = d_pseudo_pat[pid]
+        
+        ix = 0
+        sub_df = df_med[df_med['PATNR']==pat].copy()
+        sub_df = sub_df.sort_values(by='periodOfUse_valuePeriod_start_date')
+        
+        prednison_df = sub_df[sub_df['ATC_display'].isin(['PREDNISOLONE', 'METHYLPREDNISOLONE'])].copy()
+        no_prednison_df = sub_df[~sub_df['ATC_display'].isin(['PREDNISOLONE', 'METHYLPREDNISOLONE'])].copy()
+        for date in list(sub_df['periodOfUse_valuePeriod_start_date']):
+            
+            if pd.to_datetime(date, format='%Y-%m-%d', errors='ignore') >=  pd.to_datetime(d_pseudo_date[pid], format='%Y-%m-%d', errors='ignore') :
+                sub_df['periodOfUse_valuePeriod_end_date'] = pd.to_datetime(sub_df['periodOfUse_valuePeriod_end_date'], format='%Y-%m-%d', errors='ignore')
+                sub_df['periodOfUse_valuePeriod_start_date'] = pd.to_datetime(sub_df['periodOfUse_valuePeriod_start_date'], format='%Y-%m-%d', errors='ignore')
+                lookbehind_end = nearestTreatment_LookBehind(sub_df['periodOfUse_valuePeriod_end_date'],pd.to_datetime(d_pseudo_date[pid], format='%Y-%m-%d', errors='ignore'))
+                lookbehind_start = nearestTreatment_LookBehind(sub_df['periodOfUse_valuePeriod_start_date'],pd.to_datetime(d_pseudo_date[pid], format='%Y-%m-%d', errors='ignore'))
+                if type(lookbehind_end) == float and type(lookbehind_start) == float:
+                    lookbehind_date = np.nan
+                elif type(lookbehind_end) == float:
+                    lookbehind_date =lookbehind_start
+                elif type(lookbehind_start) == float:
+                    lookbehind_date =lookbehind_end
+                else :
+                    lookbehind_date = max(lookbehind_end,lookbehind_start)
+                if type(lookbehind_date) != float: # nan
+                    if lookbehind_date > pd.to_datetime(d_pseudo_date[pid], format='%Y-%m-%d', errors='ignore') - pd.DateOffset(months=no_drug_window): 
+                        missing_baseline = True # ensure medication hasn't started (looking 6 months prior to consult)
+                
+                # Acquire first date of prednison
+                prednison_df = prednison_df[pd.to_datetime(prednison_df['periodOfUse_valuePeriod_start_date'], format='%Y-%m-%d', errors='ignore') >= pd.to_datetime(date, format='%Y-%m-%d', errors='ignore')].sort_values(by='periodOfUse_valuePeriod_start_date')
+                if len(prednison_df) > 0 :
+                    first_pred = prednison_df['periodOfUse_valuePeriod_start_date'].iloc[0]
+                else :
+                    first_pred = np.nan
+                    
+                # Acquire first date of DMARD
+                no_prednison_df = no_prednison_df[pd.to_datetime(no_prednison_df['periodOfUse_valuePeriod_start_date'], format='%Y-%m-%d', errors='ignore') >= pd.to_datetime(date, format='%Y-%m-%d', errors='ignore')].sort_values(by='periodOfUse_valuePeriod_start_date')
+                if len(no_prednison_df) > 0 :
+                    first_dmard = no_prednison_df['periodOfUse_valuePeriod_start_date'].iloc[0]
+                else :
+                    first_dmard = np.nan
+                    
+                df_treat.loc[len(df_treat)] = [pid, sub_df['PATNR'].iloc[ix], sub_df.iloc[ix].name, sub_df['ATC_display'].iloc[ix], sub_df['dosageInstruction_text'].iloc[ix], pd.to_datetime(d_pseudo_date[pid], format='%Y-%m-%d', errors='ignore'), date, lookbehind_date, first_pred, first_dmard, False, missing_baseline]
+                no_med = False
+                break 
+                
+                
+            ix += 1
+            
+        if len(sub_df) == 0: # These patients have no medication information
+            df_treat.loc[len(df_treat)] = [pid, pat, -1, np.nan, np.nan, pd.to_datetime(d_pseudo_date[pid], format='%Y-%m-%d', errors='ignore'), np.nan, np.nan, np.nan, np.nan, True, True]
+        elif no_med: # These patients have medication information at some point, but not in close proximity to the baseline
+            df_treat.loc[len(df_treat)] = [pid, pat, -1, np.nan, np.nan, pd.to_datetime(d_pseudo_date[pid], format='%Y-%m-%d', errors='ignore'), np.nan, np.nan, np.nan, np.nan, False, True]
+    
+    return df_treat
+
+def getStartTreatmentDateMETEOR(df_med, d_pat_date, no_drug_window=6):
+    """  
+    Description:
+    This function extracts the date where a patient takes medication for the first time
+    (after the first consult)
+    
+    This function is designed for METEOR data, whereby the first consult is not ambigious.
+    
+    Input:
+        df_med = dataframe with medicator information
+        d_pat_date = dictionary whereby patient ids are linked to the first consult date
+        no_drug_window = ensure there is no drug prior to the picked baseline (default = 6 months)
+            - Otherwise, it is no true baseline because the our measures are then biased by
+                drug interference
+    Output:
+        df_treat = dataframe with the date of the first treatment after the specified date of baseline
+    """
+    c_close = 0
+    def nearestTreatment_LookBehind(items, pivot):
+        
+        items = [item for item in items if item < pd.to_datetime(pivot, format='%Y-%m-%d', errors='ignore') ]
+        #print(items)
+        if items == []:
+            return np.nan
+        else : 
+            return min(items, key=lambda x: abs(x - pivot))
+    
+    df_treat = pd.DataFrame(columns=['patnr', 'index', 'Drug', 'Instruction', 'FirstConsult', 'Lookahead_Treatment', 'Lookbehind_Treatment', 'Lookahead_Prednison', 'FILTER_RX_NA', 'FILTER_RX_NA_BASELINE']) 
+    
+    
+    for pat in df_med['PATNR'].unique():
+        no_med = True # register if medication is found
+        missing_baseline = False
+        
+        ix = 0
+        sub_df = df_med[df_med['PATNR']==pat].copy()
+        sub_df = sub_df.sort_values(by='periodOfUse_valuePeriod_start_date')
+        
+        prednison_df = sub_df[sub_df['ATC_display'].isin(['PREDNISOLONE', 'METHYLPREDNISOLONE'])].copy()
+        for date in list(sub_df['periodOfUse_valuePeriod_start_date']):
+            
+            if pd.to_datetime(date, format='%Y-%m-%d', errors='ignore') >=  pd.to_datetime(d_pat_date[pat], format='%Y-%m-%d', errors='ignore') :
+                sub_df['periodOfUse_valuePeriod_end_date'] = pd.to_datetime(sub_df['periodOfUse_valuePeriod_end_date'], format='%Y-%m-%d', errors='ignore')
+                sub_df['periodOfUse_valuePeriod_start_date'] = pd.to_datetime(sub_df['periodOfUse_valuePeriod_start_date'], format='%Y-%m-%d', errors='ignore')
+                lookbehind_end = nearestTreatment_LookBehind(sub_df['periodOfUse_valuePeriod_end_date'],pd.to_datetime(d_pat_date[pat], format='%Y-%m-%d', errors='ignore'))
+                lookbehind_start = nearestTreatment_LookBehind(sub_df['periodOfUse_valuePeriod_start_date'],pd.to_datetime(d_pat_date[pat], format='%Y-%m-%d', errors='ignore'))
+                if type(lookbehind_end) == float and type(lookbehind_start) == float:
+                    lookbehind_date = np.nan
+                elif type(lookbehind_end) == float:
+                    lookbehind_date =lookbehind_start
+                elif type(lookbehind_start) == float:
+                    lookbehind_date =lookbehind_end
+                else :
+                    lookbehind_date = max(lookbehind_end,lookbehind_start)
+                if type(lookbehind_date) != float: # nan
+                    if lookbehind_date > pd.to_datetime(d_pat_date[pat], format='%Y-%m-%d', errors='ignore') - pd.DateOffset(months=no_drug_window): 
+                        missing_baseline = True # ensure medication hasn't started (looking 6 months prior to consult)
+                
+                # Acquire first date of prednison
+                prednison_df = prednison_df[pd.to_datetime(prednison_df['periodOfUse_valuePeriod_start_date'], format='%Y-%m-%d', errors='ignore') >= pd.to_datetime(date, format='%Y-%m-%d', errors='ignore')].sort_values(by='periodOfUse_valuePeriod_start_date')
+                if len(prednison_df) > 0 :
+                    first_pred = prednison_df['periodOfUse_valuePeriod_start_date'].iloc[0]
+                else :
+                    first_pred = np.nan
+                df_treat.loc[len(df_treat)] = [sub_df['PATNR'].iloc[ix], sub_df.iloc[ix].name, sub_df['ATC_display'].iloc[ix], sub_df['dosageInstruction_text'].iloc[ix], pd.to_datetime(d_pat_date[pat], format='%d-%m-%Y', errors='ignore'), date, lookbehind_date, first_pred, False, missing_baseline]
+                no_med = False
+                break 
+            ix += 1
+            
+        if len(sub_df) == 0: # These patients have no medication information
+            df_treat.loc[len(df_treat)] = [ pat, -1, np.nan, np.nan, pd.to_datetime(d_pat_date[pat], format='%Y-%m-%d', errors='ignore'), np.nan, np.nan, np.nan, True, True]
+        elif no_med: # These patients have medication information at some point, but not in close proximity to the baseline
+            df_treat.loc[len(df_treat)] = [ pat, -1, np.nan, np.nan, pd.to_datetime(d_pat_date[pat], format='%Y-%m-%d', errors='ignore'), np.nan, np.nan, np.nan, False, True]
+    
+    return df_treat
+
+def removeAccent(text):
+    """
+    This function removes the accent of characters from the text.
+
+    Variables:
+        text = text to be processed
+    """
+    try:
+        text = unicode(text, 'utf-8')
+    except NameError: # unicode is a default on python 3 
+        pass
+    text = unicodedata.normalize('NFD', text)
+    text = text.encode('ascii', 'ignore')
+    text = text.decode("utf-8")
+    return text
 
 def processArtefactsXML(entry):
     """
@@ -74,7 +246,7 @@ def simpleCleaning(sentence, lemma=False): # Keep in mind: this function removes
     return sentence
     
     
-def reformat_ddrA(df, pat_col='PATNR', time_col='DATUM'): # patient_data, 
+def reformat_ddrA(df, pat_col='PATNR', time_col='DATUM', aggregate=False): # patient_data, 
     """
     Cast DDR_A questionaire file from long to wide format. 
     Entries are merged on patient number.
@@ -83,12 +255,13 @@ def reformat_ddrA(df, pat_col='PATNR', time_col='DATUM'): # patient_data,
         df = dataframe (default HIX-output)
         pat_col = the patient identifier column
         time_col = the column with the date
+        aggregate = whether or not to aggregate the text
     Output:
         o_df = output dataframe where each variable is its own column
     """
     print("\nProcessing lab data...") # PseudoID # patient_id'
     # Sort df - Keep the first measure -> cause we want to get the baseline characteristics
-    df.sort_values([pat_col, time_col], ascending=False, ignore_index=True, inplace=True)
+    df.sort_values([pat_col, time_col], ascending=True, ignore_index=True, inplace=True)
     # New empty output df
     o_df = pd.DataFrame(columns=['patnr', 'time'])
     o_row = -1
@@ -124,7 +297,11 @@ def reformat_ddrA(df, pat_col='PATNR', time_col='DATUM'): # patient_data,
 
         # Populate row in output dataframe
         o_df.at[o_row, 'patnr'] = pseudo_id
-        o_df.at[o_row, feature] = value
+        if type(o_df.at[o_row, feature]) != float and o_df.at[o_row, feature] != '' and aggregate==True:
+            o_df.at[o_row, feature] += ' [END_RECORD] ' + value
+        else :
+            o_df.at[o_row, feature] = value
+            #print(eql)
         o_df.at[o_row, 'time'] = time
         
     return o_df
@@ -141,15 +318,15 @@ def create_dict_pat(df, val=['Anti-CCP']):
         d_val = dictionary with the lab quantity
     """
     d_val = {}
-    for pat in df['patient_id'].unique():
-        df_sub = df[((df['patient_id']==pat) & (df['test_naam_omschrijving'].isin(val)))]
-        try :
+    for pat in df['pseudoId'].unique():
+        df_sub = df[((df['pseudoId']==pat) & (df['test_naam_omschrijving'].isin(val)))]
+        if len(df_sub) > 0:
             for i in range(len(df_sub)):
                 result = df_sub['uitslag_text'].iloc[0]
-                if result not in ['-volgt-', '@volgt'] : # stopgezet?
+                if result not in ['-volgt-', '@volgt', np.nan] : # stopgezet?
                     d_val[pat] = result
-        except:
-            d_val[pat] = np.nan
+        #else:
+        #    d_val[pat] = np.nan
     return d_val
 
 def use_max_lab(row, col_test=['BSE'], col_val='uitslag_value', col_alt='uitslag_text', col_desc='test_naam_omschrijving'):
@@ -205,6 +382,8 @@ def infer_RF(val):
                 val_str= 'Negatief'
             else  : # or under 3.5
                 val_str = 'Dubieus'
+        elif val_str in ['nan', 'Bepaling niet ui']: 
+            val_str = np.nan
         return val_str
     except:
         return val
@@ -231,6 +410,8 @@ def infer_aCCP(val):
                 val_str = 'Negatief'
             else  : # or under 7
                 val_str = 'Dubieus'
+        elif val_str in ['nan', 'Bepaling niet ui']: 
+            val_str = np.nan
         return val_str
     except:
         return val
@@ -382,13 +563,13 @@ def fuzzy_feature(descr, unit, value):
         #elif value in ['-volgt-', 'Stopgezet', '@volgt']:
         #    value = np.nan
     feature = f"{descr}{f' ({unit})' if not pd.isnull(unit) else ''}"
-    return feature
+    return feature, value
         
 
-def reformat_lab(df, pat_col='patient_id', time_col='Monster_Afname_Datumtijd'):
+def reformat_lab(df, pat_col='pseudoId', time_col='Monster_Afname_Datumtijd'):
     """
     Cast raw LAB file from long to wide format. 
-    Entries are merged on patient number (patient_id).
+    Entries are merged on pseudoId (patnr + visit nr).
     
     Input:
         df = dataframe (default HIX-output)
@@ -401,7 +582,7 @@ def reformat_lab(df, pat_col='patient_id', time_col='Monster_Afname_Datumtijd'):
     # Sort df - Keep the first measure -> cause we want to get the baseline characteristics
     df.sort_values([pat_col, time_col], ascending=False, ignore_index=True, inplace=True)
     # New empty output df
-    o_df = pd.DataFrame(columns=['patnr', 'time'])
+    o_df = pd.DataFrame(columns=['pseudoId', 'time'])
     o_row = -1
     pseudo_id = 0
     o_time = 0
@@ -426,10 +607,8 @@ def reformat_lab(df, pat_col='patient_id', time_col='Monster_Afname_Datumtijd'):
         if str(descr).endswith(str(unit)) or str(descr).endswith(f'({unit})'):
             unit = np.nan
         
+        feature, value = fuzzy_feature(descr, unit, value)
         
-        feature = fuzzy_feature(descr, unit, value)
-        
-
         # Make absolute time point relative to first symptoms day
         #time = abs_to_rel_date(patient_data['symptoms_date'].loc[pat_col], o_time)
         time = o_time
@@ -439,580 +618,8 @@ def reformat_lab(df, pat_col='patient_id', time_col='Monster_Afname_Datumtijd'):
             o_df[feature] = np.nan
 
         # Populate row in output dataframe
-        o_df.at[o_row, 'patnr'] = pseudo_id
+        o_df.at[o_row, 'pseudoId'] = pseudo_id
         o_df.at[o_row, feature] = value
         o_df.at[o_row, 'time'] = time
 
     return o_df
-
-def makeTSNE_Cluster2(values, l_id, l_val, l_lbl, title, pal, perp=30, legend=['RF', 'aCCP'], l_order=[], seed=1234):
-    """
-    
-    Perform a t-SNE dimension reduction and render an interactive bokeh plot
-    
-    Input:
-        values = datapoints on which PCA should be performed
-        l_id = list of (patient) identifiers (patient id)
-        l_val = list of second lable
-        l_lbl = list of labels associated to datapoints (often categories)
-        title = String containing title of plot
-        lgend = list with labels of the two provided columns
-        pal = pallete
-        perp = perplexity for t-SNE
-        seed = random seed
-    """
-    plot_tfidf = bp.figure(plot_width=700, plot_height=600, title="A T-SNE projection of %s patients" % (len(l_id)), tools="pan,wheel_zoom,box_zoom,reset,hover,save",
-        x_axis_type=None, y_axis_type=None, min_border=1)
-
-    # dimensionality reduction. converting the vectors to 2d vectors
-    tsne_model = TSNE(n_components=2, verbose=1, perplexity=perp, random_state=seed)
-    tsne_2d = tsne_model.fit_transform(values)
-    
-    color_mapper = CategoricalColorMapper(factors=list(set(l_val)), palette=pal[0])
-    
-    if l_order != []:
-        color_mapper2 = CategoricalColorMapper(factors=l_order, palette=pal[1])
-    else :
-        color_mapper2 = CategoricalColorMapper(factors=list(set(l_lbl)), palette=pal[1])
-    
-    # putting everything in a dataframe
-    tsne_df = pd.DataFrame(tsne_2d, columns=['x', 'y'])
-    tsne_df['pt'] = l_id
-    tsne_df['label'] = l_lbl 
-    tsne_df['value'] = l_val
-    
-    p1 = bp.figure(plot_width=700, plot_height=600, title="A T-SNE projection of %s patients" % (len(l_id)),
-        tools="pan,wheel_zoom,box_zoom,reset,hover,save",
-        x_axis_type=None, y_axis_type=None, min_border=1)
-    
-    p1.scatter(x='x', y='y', source=tsne_df, legend_field='label', size=10,  color={'field': 'label', 'transform': color_mapper2}) # fill_color=mapper
-    
-    hover = p1.select(dict(type=HoverTool)) # or p1
-    hover.tooltips={"pt": "@pt",legend[0] : "@value", legend[1]: "@label"}
-    
-    tab1 = Panel(child=p1, title=legend[1])
-    
-    p2 = bp.figure(plot_width=700, plot_height=600, title="A T-SNE projection of %s patients" % (len(l_id)),
-        tools="pan,wheel_zoom,box_zoom,reset,hover,save",
-        x_axis_type=None, y_axis_type=None, min_border=1)
-    p2.scatter(x='x', y='y', source=tsne_df, legend_field='value', size=10,  color={'field': 'value', 'transform': color_mapper})
-    
-    hover2 = p2.select(dict(type=HoverTool)) # or p1
-    hover2.tooltips={"pt": "@pt", legend[0] : "@value", legend[1]: "@label"}
-    
-    tab2 = Panel(child=p2, title=legend[0])
-    
-    tabs = Tabs(tabs=[  tab2, tab1])
-
-    bp.output_file('../TSNE/Baseline_tsne_%s.html' % (title), mode='inline')
-
-    bp.save(tabs)
-    print('\nTSNE figure saved under location: TSNE/Baseline_tsne_%s.html' % (title))
-    return 
-
-def makePCA(values, l_id, l_lbl, title, pal, radius=0.05, l_order=[], seed=1234):
-    """
-    Perform Principal Component Analysis for dimension reduction
-    
-    values = datapoints on which PCA should be performed
-    l_id = list of (patient) identifiers associated to datapoints 
-    l_lbl = list of labels associated to datapoints
-    title = String containing title of plot
-    pal = pallete
-    radius = radius of the points to draw 
-    l_order = list to indicate how labels should be sorted for coloring
-    seed = random seed
-    """
-    # dimensionality reduction. converting the vectors to 2d vectors
-    pca_model = PCA(n_components=2, random_state=seed) # , verbose=1, random_state=0
-    pca_2d = pca_model.fit_transform(values)
-    print('Explained PCA:\tPC1=', pca_model.explained_variance_ratio_[0], '\tPC2=',pca_model.explained_variance_ratio_[1])
-    if l_order != []:
-        color_mapper = CategoricalColorMapper(factors=l_order, palette=pal)
-    else :
-        color_mapper = CategoricalColorMapper(factors=list(set(l_lbl)), palette=pal)
-
-    # putting everything in a dataframe
-    pca_df = pd.DataFrame(pca_2d, columns=['x', 'y'])
-    pca_df['pt'] = l_id
-    pca_df['label'] = l_lbl #df.cc.astype('category').cat.codes
-    
-    plot_tfidf = bp.figure(plot_width=700, plot_height=600, title="A PCA projection of %s patients (Explained PCA:\tPC1=%.2f\tPC2=%.2f)" %(len(l_id), pca_model.explained_variance_ratio_[0], pca_model.explained_variance_ratio_[1]),        tools="pan,wheel_zoom,box_zoom,reset,hover,save", x_axis_type=None, y_axis_type=None, min_border=1)
-    
-    # plotting. the corresponding word appears when you hover on the data point.
-    plot_tfidf.scatter(x='x', y='y', source=pca_df, legend_field="label", radius=radius,  color={'field': 'label', 'transform': color_mapper}) # fill_color=mapper
-    hover = plot_tfidf.select(dict(type=HoverTool))
-    hover.tooltips={"pt": "@pt"}
-    bp.output_file('../TSNE/Baseline_pca_%s.html' % (title), mode='inline')
-    bp.save(plot_tfidf)
-    print('PCA figure saved under location: TSNE/Baseline_pca_%s.html' % (title))
-    return
-
-def makeMCA(values, l_id, l_lbl, title, pal, radius=0.05, l_order=[], seed=1234):
-    """
-    Perform MCA for dimension reduction
-    
-    values = datapoints on which PCA should be performed
-    l_id = list of (patient) identifiers associated to datapoints 
-    l_lbl = list of labels associated to datapoints
-    title = String containing title of plot
-    pal = pallete
-    radius = radius of the points to draw 
-    l_order = list to indicate how labels should be sorted for coloring
-    seed = random seed
-    """
-    # dimensionality reduction. converting the vectors to 2d vectors
-    
-    mca_model = FactorAnalysis(n_components=2, random_state=0)
-    mca_2d = mca_model.fit_transform(values)
-    print('Explained PCA:\tPC1=', 15, '\tPC2=',10)
-    if l_order != []:
-        color_mapper = CategoricalColorMapper(factors=l_order, palette=pal)
-    else :
-        color_mapper = CategoricalColorMapper(factors=list(set(l_lbl)), palette=pal)
-
-    # putting everything in a dataframe
-    mca_df = pd.DataFrame(mca_2d, columns=['x', 'y'])
-    print(len(mca_df), len(l_id), len(l_lbl))
-    print(len(l_lbl.unique()))
-    mca_df['pt'] = l_id
-    mca_df['label'] = l_lbl #df.cc.astype('category').cat.codes
-    
-    plot_tfidf = bp.figure(plot_width=700, plot_height=600, title="A MCA projection of %s patients)" %(len(l_id)),        tools="pan,wheel_zoom,box_zoom,reset,hover,save", x_axis_type=None, y_axis_type=None, min_border=1)
-    
-    # plotting. the corresponding word appears when you hover on the data point.
-    plot_tfidf.scatter(x='x', y='y', source=mca_df, legend_field="label", radius=radius,  color={'field': 'label', 'transform': color_mapper}) # fill_color=mapper
-    hover = plot_tfidf.select(dict(type=HoverTool))
-    hover.tooltips={"pt": "@pt"}
-    bp.output_file('../TSNE/Baseline_mca_%s.html' % (title), mode='inline')
-    bp.save(plot_tfidf)
-    print('MCA figure saved under location: TSNE/Baseline_mca_%s.html' % (title))
-    return
-
-def elbowMethod(X_trans, method='kmeans', n=20, save_as=''):
-    """
-    Define optimal number of clusters with elbow method, optimized for 
-    Within cluster sum of errors(wcss).
-    
-    Input:
-        X_trans = Distance matrix based on HPO binary data (X)
-        method = clustering method
-        n = search space (number of clusters to consider)
-        save_as = title used for saving the elbow plot figure
-            (no title implies that the figure won't be saved)
-    
-    Return:
-        k = Number of clusters that corresponds to optimized WCSS
-    """
-    methods = {'kmeans' : KMeans(n_clusters=3, init='k-means++', max_iter=300, n_init=10, random_state=0), 
-              'fuzz' : []}
-    lbl = {'kmeans' : ['Number of clusters', 'WCCS'], 
-          'fuzz' : ['Number of clusters', 'fuzzy partition coefficient']}
-    
-    wcss = []
-    distances = []
-    fig1, ax1 = plt.subplots(1,2,figsize=(12,6))
-    
-    kmeans = methods[method]
-    
-    for i in range(1, n+1):
-        if method == 'kmeans':
-            kmeans.n_clusters = i
-            kmeans.fit(X_trans)
-            wcss.append(kmeans.inertia_)
-        elif method == 'fuzz':
-            cntr, u, u0, d, jm, p, fpc = fuzz.cluster.cmeans(X_trans, i, 2, error=0.005, maxiter=1000, init=123)
-            wcss.append(fpc)
-
-    for i in range(1, len(wcss)+1):
-        p1=np.array((1,wcss[0]))
-        p2=np.array((n,wcss[len(wcss)-1]))
-        p3 =np.array((i+1, wcss[i-1]))
-        distances.append(norm(np.cross(p2-p1, p1-p3))/norm(p2-p1))
-        
-    k = distances.index(max(distances))+1
-
-    ax1[0].plot(range(1, len(wcss)+1), wcss)
-    ax1[0].set_title('Elbow Method')
-    ax1[0].set_xlabel(lbl[method][0])
-    ax1[0].set_ylabel(lbl[method][1])
-    
-    ax1[1].plot(range(1, len(wcss)+1), distances, color='r')
-    ax1[1].plot([k, k], [max(distances),0],
-                 color='navy', linestyle='--')
-    ax1[1].set_title('Perpendicular distance to line between first and last observation')
-    ax1[1].set_xlabel('Number of clusters')
-    ax1[1].set_ylabel('Distance')
-    
-    if save_as != '':
-        plt.savefig('../figures/3_clustering/elbow_plot_%s' % (save_as))
-    else : 
-        plt.show()
-    return k
-
-def make_tsne(dist, l_cat, identifier,perp=30, seed=1234, df=None, title=''):
-    """
-    Generate tsne
-    
-    dist= dataframe with distances
-    df = dataframe with columns (in case dist only features the distances)
-    """
-    if type(df) == float:
-        df = dist.copy()
-    values = dist
-    first_col = df[l_cat[0]] # c_first
-    l_hex = ['#f00', '#fe0500', '#fc0a00', '#fb0f00', '#fa1400', '#f91900', '#f71e00', '#f62200', '#f52700', '#f42c00', '#f23000', '#f13500', '#f03a00', '#ee3e00', '#ed4200', '#ec4700', '#eb4b00', '#e94f00', '#e85400', '#e75800', '#e65c00', '#e46000', '#e36400', '#e26800', '#e16c00', '#df7000', '#de7300', '#d70', '#db7b00', '#da7f00', '#d98200', '#d88600', '#d68900', '#d58d00', '#d49000', '#d39300', '#d19700', '#d09a00', '#cf9d00', '#cda000', '#cca300', '#cba600', '#caa900', '#c8ac00', '#c7af00', '#c6b200', '#c5b500', '#c3b800', '#c2ba00', '#c1bd00', '#bfbf00', '#babe00', '#b5bd00', '#b0bc00', '#acba00', '#a7b900', '#a2b800', '#9db700', '#98b500', '#94b400', '#8fb300', '#8ab200', '#86b000', '#81af00', '#7dae00', '#79ac00', '#74ab00', '#70aa00', '#6ca900', '#68a700', '#64a600', '#60a500', '#5ca400', '#58a200', '#54a100', '#50a000', '#4c9e00', '#489d00', '#459c00', '#419b00', '#3d9900', '#3a9800', '#369700', '#339600', '#2f9400', '#2c9300', '#299200', '#269100', '#228f00', '#1f8e00', '#1c8d00', '#198b00', '#168a00', '#138900', '#108800', '#0d8600', '#0b8500', '#088400', '#058300', '#038100', '#008000']
-    c_first = [l_hex[round(i/max(df[l_cat[0]]) * 100)] for i in df[l_cat[0]]]
-    
-    # Run T-SNE
-    tsne_model = TSNE(n_components=2, verbose=1, perplexity=perp, random_state=seed)
-    tsne_2d = tsne_model.fit_transform(values)
-    
-    # putting everything in a dataframe
-    tsne_df = pd.DataFrame(tsne_2d, columns=['x', 'y'])
-    
-    d_col = dict(x=tsne_df['x'], y=tsne_df['y'], pt=df[identifier], c_col=c_first)
-    
-    for cat in l_cat:
-        d_col[cat] = df[cat]
-    
-    s1 = ColumnDataSource(data=d_col)
-    
-    tsne_df['pt'] = df[identifier]
-    tsne_df['value'] = first_col
-    
-    p3 = figure(plot_width=700, plot_height=600, tools="pan,wheel_zoom,box_zoom,reset,hover,save", title="A T-SNE projection of %s patients" % (len(first_col)))
-    cir = p3.circle('x', 'y', source=s1, alpha=1, line_color='c_col',  fill_color='c_col')
-
-    color_select = Select(title="color", value=l_cat[0], 
-                        options = l_cat,)
-    color_select.js_on_change('value', CustomJS(args=dict(cir=cir,s1=s1),
-                                          code="""                                                             
-        var data = s1.data;
-        var gradient = ['#f00', '#fe0500', '#fc0a00', '#fb0f00', '#fa1400', '#f91900', '#f71e00', '#f62200', '#f52700', '#f42c00', '#f23000', '#f13500', '#f03a00', '#ee3e00', '#ed4200', '#ec4700', '#eb4b00', '#e94f00', '#e85400', '#e75800', '#e65c00', '#e46000', '#e36400', '#e26800', '#e16c00', '#df7000', '#de7300', '#d70', '#db7b00', '#da7f00', '#d98200', '#d88600', '#d68900', '#d58d00', '#d49000', '#d39300', '#d19700', '#d09a00', '#cf9d00', '#cda000', '#cca300', '#cba600', '#caa900', '#c8ac00', '#c7af00', '#c6b200', '#c5b500', '#c3b800', '#c2ba00', '#c1bd00', '#bfbf00', '#babe00', '#b5bd00', '#b0bc00', '#acba00', '#a7b900', '#a2b800', '#9db700', '#98b500', '#94b400', '#8fb300', '#8ab200', '#86b000', '#81af00', '#7dae00', '#79ac00', '#74ab00', '#70aa00', '#6ca900', '#68a700', '#64a600', '#60a500', '#5ca400', '#58a200', '#54a100', '#50a000', '#4c9e00', '#489d00', '#459c00', '#419b00', '#3d9900', '#3a9800', '#369700', '#339600', '#2f9400', '#2c9300', '#299200', '#269100', '#228f00', '#1f8e00', '#1c8d00', '#198b00', '#168a00', '#138900', '#108800', '#0d8600', '#0b8500', '#088400', '#058300', '#038100', '#008000'];    
-
-        var selected_color = cb_obj.value;
-
-        console.log(cb_obj.value)
-        
-        data["desc"] = [] ;
-        for (var i=0;i<data["x"].length; i++) {
-        data["desc"].push(data[selected_color][i]);
-        };
-
-        var max = data[selected_color].reduce(function(a, b) {
-            return Math.max(a, b);
-        });
-
-        data["c_col"] = [] ;
-        for (var i=0;i<data["x"].length; i++) {
-        var ix = (Math.floor((data[selected_color][i]/max) * 100))
-        data["c_col"].push(gradient[ix]);
-        };
-
-        
-
-        cir.glyph.line_color.field = "c_col";
-        cir.glyph.fill_color.field = "c_col";
-
-        s1.change.emit()
-
-    """)) # dict[cb_obj.value]
-
-    hover = p3.select(dict(type=HoverTool)) # or p1
-    hover.tooltips={"ID": "@pt","value" : "@desc"}
-
-    layout = gridplot([[p3],[color_select]]) # 
-
-    bio.output_file("../TSNE/Baseline_tsne_%s.html" % (title), mode='inline')
-    bio.show(layout)
-
-    print('\nTSNE figure saved under location: TSNE/Baseline_tsne_%s.html' % (title))
-    return
-
-def make_umap(embedding, df, l_cat, identifier,perp=30, seed=1234, title=''):
-    """
-    Make UMAP
-    
-    embedding= dataframe / 2d array with distances
-    df = dataframe with columns (in case dist only features the distances)
-    """
-    #if type(df) == float:
-    #    df = embedding.copy()
-    #values = embedding
-    first_col = df[l_cat[0]] # c_first
-    l_hex = ['#f00', '#fe0500', '#fc0a00', '#fb0f00', '#fa1400', '#f91900', '#f71e00', '#f62200', '#f52700', '#f42c00', '#f23000', '#f13500', '#f03a00', '#ee3e00', '#ed4200', '#ec4700', '#eb4b00', '#e94f00', '#e85400', '#e75800', '#e65c00', '#e46000', '#e36400', '#e26800', '#e16c00', '#df7000', '#de7300', '#d70', '#db7b00', '#da7f00', '#d98200', '#d88600', '#d68900', '#d58d00', '#d49000', '#d39300', '#d19700', '#d09a00', '#cf9d00', '#cda000', '#cca300', '#cba600', '#caa900', '#c8ac00', '#c7af00', '#c6b200', '#c5b500', '#c3b800', '#c2ba00', '#c1bd00', '#bfbf00', '#babe00', '#b5bd00', '#b0bc00', '#acba00', '#a7b900', '#a2b800', '#9db700', '#98b500', '#94b400', '#8fb300', '#8ab200', '#86b000', '#81af00', '#7dae00', '#79ac00', '#74ab00', '#70aa00', '#6ca900', '#68a700', '#64a600', '#60a500', '#5ca400', '#58a200', '#54a100', '#50a000', '#4c9e00', '#489d00', '#459c00', '#419b00', '#3d9900', '#3a9800', '#369700', '#339600', '#2f9400', '#2c9300', '#299200', '#269100', '#228f00', '#1f8e00', '#1c8d00', '#198b00', '#168a00', '#138900', '#108800', '#0d8600', '#0b8500', '#088400', '#058300', '#038100', '#008000']
-    c_first = [l_hex[round(i/max(df[l_cat[0]]) * 100)] for i in df[l_cat[0]]]
-    
-    # Run UMAP
-    #mapper_2d = umap.UMAP().fit_transform(values)
-    
-    # putting everything in a dataframe
-    umap_df = pd.DataFrame(embedding, columns=['x', 'y'])
-    
-    d_col = dict(x=umap_df['x'], y=umap_df['y'], pt=df[identifier], c_col=c_first)
-    
-    for cat in l_cat:
-        d_col[cat] = df[cat]
-    
-    s1 = ColumnDataSource(data=d_col)
-    
-    umap_df['pt'] = df[identifier]
-    umap_df['value'] = first_col
-    
-    p3 = figure(plot_width=700, plot_height=600, tools="pan,wheel_zoom,box_zoom,reset,hover,save", title="A T-SNE projection of %s patients" % (len(first_col)))
-    cir = p3.circle('x', 'y', source=s1, alpha=1, line_color='c_col',  fill_color='c_col')
-
-    color_select = Select(title="color", value=l_cat[0], 
-                        options = l_cat,)
-    color_select.js_on_change('value', CustomJS(args=dict(cir=cir,s1=s1),
-                                          code="""                                                             
-        var data = s1.data;
-        var gradient = ['#f00', '#fe0500', '#fc0a00', '#fb0f00', '#fa1400', '#f91900', '#f71e00', '#f62200', '#f52700', '#f42c00', '#f23000', '#f13500', '#f03a00', '#ee3e00', '#ed4200', '#ec4700', '#eb4b00', '#e94f00', '#e85400', '#e75800', '#e65c00', '#e46000', '#e36400', '#e26800', '#e16c00', '#df7000', '#de7300', '#d70', '#db7b00', '#da7f00', '#d98200', '#d88600', '#d68900', '#d58d00', '#d49000', '#d39300', '#d19700', '#d09a00', '#cf9d00', '#cda000', '#cca300', '#cba600', '#caa900', '#c8ac00', '#c7af00', '#c6b200', '#c5b500', '#c3b800', '#c2ba00', '#c1bd00', '#bfbf00', '#babe00', '#b5bd00', '#b0bc00', '#acba00', '#a7b900', '#a2b800', '#9db700', '#98b500', '#94b400', '#8fb300', '#8ab200', '#86b000', '#81af00', '#7dae00', '#79ac00', '#74ab00', '#70aa00', '#6ca900', '#68a700', '#64a600', '#60a500', '#5ca400', '#58a200', '#54a100', '#50a000', '#4c9e00', '#489d00', '#459c00', '#419b00', '#3d9900', '#3a9800', '#369700', '#339600', '#2f9400', '#2c9300', '#299200', '#269100', '#228f00', '#1f8e00', '#1c8d00', '#198b00', '#168a00', '#138900', '#108800', '#0d8600', '#0b8500', '#088400', '#058300', '#038100', '#008000'];    
-
-        var selected_color = cb_obj.value;
-
-        console.log(cb_obj.value)
-        
-        data["desc"] = [] ;
-        for (var i=0;i<data["x"].length; i++) {
-        data["desc"].push(data[selected_color][i]);
-        };
-
-        var max = data[selected_color].reduce(function(a, b) {
-            return Math.max(a, b);
-        });
-
-        data["c_col"] = [] ;
-        for (var i=0;i<data["x"].length; i++) {
-        var ix = (Math.floor((data[selected_color][i]/max) * 100))
-        data["c_col"].push(gradient[ix]);
-        };
-
-        
-
-        cir.glyph.line_color.field = "c_col";
-        cir.glyph.fill_color.field = "c_col";
-
-        s1.change.emit()
-
-    """)) # dict[cb_obj.value]
-
-    hover = p3.select(dict(type=HoverTool)) # or p1
-    hover.tooltips={"ID": "@pt","value" : "@desc"}
-
-    layout = gridplot([[p3],[color_select]]) # 
-    
-
-    bio.output_file("../TSNE/Baseline_umap_%s.html" % (title), mode='inline')
-    bio.show(layout)
-
-    print('\nUMAP figure saved under location: TSNE/Baseline_umap_%s.html' % (title))
-    return
-
-def visualize_umap_bokeh(embedding, df, l_cat, l_binary=[], patient_id='patnr', cluster_id='PhenoGraph_clusters', title='', path=None):
-    """
-    This function generates a bokeh scatter plot based on the provided embedding 
-    (which is generated by a dimension reduction technique)
-    
-    Input:
-        embedding= dataframe / 2d array with distances
-        df = dataframe with columns (in case dist only features the distances)
-        l_cat = specify columns to showcase
-        l_binary = indicates the binary columns where the prevalence should be calculated instead of the mean!
-        patient_id = str indicating column of patient
-        cluster_id = str indicating column of clusters
-        title = title of the bokeh plot
-        path = str indicating the path where to save the file
-    
-    Output:
-        Interactive HTML with a UMAP render
-    """
-    cluster_ix = 0
-
-    first_col = df[l_cat[0]] # c_first
-    l_hex = ['#f00', '#fe0500', '#fc0a00', '#fb0f00', '#fa1400', '#f91900', '#f71e00', '#f62200', '#f52700', '#f42c00', '#f23000', '#f13500', '#f03a00', '#ee3e00', '#ed4200', '#ec4700', '#eb4b00', '#e94f00', '#e85400', '#e75800', '#e65c00', '#e46000', '#e36400', '#e26800', '#e16c00', '#df7000', '#de7300', '#d70', '#db7b00', '#da7f00', '#d98200', '#d88600', '#d68900', '#d58d00', '#d49000', '#d39300', '#d19700', '#d09a00', '#cf9d00', '#cda000', '#cca300', '#cba600', '#caa900', '#c8ac00', '#c7af00', '#c6b200', '#c5b500', '#c3b800', '#c2ba00', '#c1bd00', '#bfbf00', '#babe00', '#b5bd00', '#b0bc00', '#acba00', '#a7b900', '#a2b800', '#9db700', '#98b500', '#94b400', '#8fb300', '#8ab200', '#86b000', '#81af00', '#7dae00', '#79ac00', '#74ab00', '#70aa00', '#6ca900', '#68a700', '#64a600', '#60a500', '#5ca400', '#58a200', '#54a100', '#50a000', '#4c9e00', '#489d00', '#459c00', '#419b00', '#3d9900', '#3a9800', '#369700', '#339600', '#2f9400', '#2c9300', '#299200', '#269100', '#228f00', '#1f8e00', '#1c8d00', '#198b00', '#168a00', '#138900', '#108800', '#0d8600', '#0b8500', '#088400', '#058300', '#038100', '#008000']
-    
-    
-    c_first = [l_hex[round(i/max(df[l_cat[0]]) * 100)] for i in df[l_cat[0]]]
-
-    c_alpha = [1 if i == cluster_ix else 0.1 for i in df[cluster_id] ]
-    
-    # putting everything in a dataframe
-    umap_df = pd.DataFrame(embedding, columns=['x', 'y'])
-    
-    d_col = dict(x=umap_df['x'], y=umap_df['y'], pt=df[patient_id], c_col=c_first, c_alpha=c_alpha)
-    
-    # Add cluster column in case user didn't specify it in l_cat
-    if cluster_id not in l_cat:
-        l_cat.append(cluster_id)
-    
-    for cat in l_cat:
-        d_col[cat] = df[cat]
-    
-    s1 = ColumnDataSource(data=d_col)
-    
-    umap_df['pt'] = df[patient_id]
-    umap_df['value'] = first_col
-    
-    p3 = figure(plot_width=600, plot_height=500, tools="pan,wheel_zoom,box_zoom,reset,hover,save", title="An UMAP projection of %s patients" % (len(first_col)))
-    cir = p3.circle('x', 'y', source=s1, alpha='c_alpha', line_color='c_col',  fill_color='c_col')
-
-    color_select = Select(title="color", value=l_cat[0], 
-                        options = l_cat,)
-    color_select.js_on_change('value', CustomJS(args=dict(cir=cir,s1=s1),
-                                          code="""                                                             
-        var data = s1.data;
-        var gradient = ['#f00', '#fe0500', '#fc0a00', '#fb0f00', '#fa1400', '#f91900', '#f71e00', '#f62200', '#f52700', '#f42c00', '#f23000', '#f13500', '#f03a00', '#ee3e00', '#ed4200', '#ec4700', '#eb4b00', '#e94f00', '#e85400', '#e75800', '#e65c00', '#e46000', '#e36400', '#e26800', '#e16c00', '#df7000', '#de7300', '#d70', '#db7b00', '#da7f00', '#d98200', '#d88600', '#d68900', '#d58d00', '#d49000', '#d39300', '#d19700', '#d09a00', '#cf9d00', '#cda000', '#cca300', '#cba600', '#caa900', '#c8ac00', '#c7af00', '#c6b200', '#c5b500', '#c3b800', '#c2ba00', '#c1bd00', '#bfbf00', '#babe00', '#b5bd00', '#b0bc00', '#acba00', '#a7b900', '#a2b800', '#9db700', '#98b500', '#94b400', '#8fb300', '#8ab200', '#86b000', '#81af00', '#7dae00', '#79ac00', '#74ab00', '#70aa00', '#6ca900', '#68a700', '#64a600', '#60a500', '#5ca400', '#58a200', '#54a100', '#50a000', '#4c9e00', '#489d00', '#459c00', '#419b00', '#3d9900', '#3a9800', '#369700', '#339600', '#2f9400', '#2c9300', '#299200', '#269100', '#228f00', '#1f8e00', '#1c8d00', '#198b00', '#168a00', '#138900', '#108800', '#0d8600', '#0b8500', '#088400', '#058300', '#038100', '#008000'];    
-
-        var selected_color = cb_obj.value;
-
-        console.log(cb_obj.value)
-        
-        data["desc"] = [] ;
-        for (var i=0;i<data["x"].length; i++) {
-        data["desc"].push(data[selected_color][i]);
-        };
-
-        var max = data[selected_color].reduce(function(a, b) {
-            return Math.max(a, b);
-        });
-
-        data["c_col"] = [] ;
-        for (var i=0;i<data["x"].length; i++) {
-        var ix = (Math.floor((data[selected_color][i]/max) * 100))
-        data["c_col"].push(gradient[ix]);
-        };
-
-        
-
-        cir.glyph.line_color.field = "c_col";
-        cir.glyph.fill_color.field = "c_col";
-
-        s1.change.emit()
-
-    """)) # dict[cb_obj.value]
-
-    hover = p3.select(dict(type=HoverTool)) # or p1
-    hover.tooltips={"ID": "@pt","value" : "@desc"}
-    
-    
-    def getSummary(col, cluster, cluster_ix):
-        if col.name == cluster_id:
-            return cluster_ix
-        elif col.dtype == float:
-            return col.mean()
-        elif col.dtype == int and col.max() < 3:
-            return len(col[col==1])/len(col) #col.value_counts()#/len(col)
-        elif col.dtype == int and col.max() > 2:
-            return col.mean()
-    
-    
-    new_df = pd.DataFrame() 
-    # by default cluster 0
-    new_df[0] = df[df[cluster_id]==cluster_ix][l_cat].apply(lambda x : getSummary(x, cluster_id, cluster_ix))
-    new_df = new_df.reset_index()
-    new_df.columns = ['var', 'meanprev']
-    
-    s2 = ColumnDataSource(new_df)
-
-    columns = [
-            TableColumn(field="var", title="Variable"),
-            TableColumn(field="meanprev", title="Mean or Prevalence"),
-        ]
-    tb = DataTable(source=s2 , columns=columns, width=400, height=280)
-
-
-    alp = Slider(start=0, end=1, value=0.1, step=.01, title="Alpha")
-    
-    
-    cluster_select = Select(title="Select cluster", value=str(cluster_ix), 
-                        options = [str(i) for i in df[cluster_id].unique()])
-    
-    # console.log(cb_obj.value)
-    # var l_lab = ['MCV', 'Leuko', 'MCH', 'Hb', 'Ht', 'MCHC', 'BSE', 'Trom', 'prediction', 'RF',  'aCCP', 'aSSA', 'ENA', 'ANA'];
-    cluster_select.js_on_change('value', CustomJS(args=dict(tb=tb, s2=s2, s1=s1, alp=alp, l_lab=l_cat, l_binary=l_binary, clust = cluster_id),
-                                          code="""
-        var l_lab = l_lab;
-        var l_cat = l_binary;
-        var clust = clust;
-        var data = s2.data;
-        var all = s1.data;
-        var alpha = alp.value;
-        var selected_number = cb_obj.value;
-
-        console.log(l_lab)
-        
-        data["meanprev"] = [] ;
-        for (var j=0;j<l_lab.length; j++){
-            var cat = l_lab[j];
-            
-            var l_rf = [];
-            var sum = 0;
-            
-            for (var i=0;i<all['x'].length; i++) {
-                if (all[clust][i] == cb_obj.value ) {
-                    l_rf.push(all[cat][i]);
-                    if (l_cat.includes(cat)) {
-                        // if categorical => count prevalence
-                        if (all[cat][i] == 1){
-                            sum += 1;
-                            };
-                        } else {
-                            // if numerical => calculate mean
-                            sum += all[cat][i];
-                        };
-                    };
-                };
-            
-            data["meanprev"].push(sum/l_rf.length);
-        };
-        data["meanprev"].push(selected_number);
-        
-        // change alpha ? 
-        all["c_alpha"] = [];
-        for (var i=0;i<all["x"].length; i++) {
-            if (all[clust][i] == cb_obj.value ) {
-                all["c_alpha"].push(1);
-            } else {
-                all["c_alpha"].push(alpha);
-            };
-        };
-        
-        
-        s1.change.emit()
-        s2.change.emit()
-    """)) 
-
-    alp.js_on_change('value', CustomJS(args=dict(tb=tb, s1=s1, cs=cluster_select, clust = cluster_id),
-                                          code="""
-        var all = s1.data;
-        var alpha = cb_obj.value;
-        var clust = clust;
-        
-        console.log(cb_obj.value)
-        
-        // change alpha ? 
-        all["c_alpha"] = [];
-        for (var i=0;i<all["x"].length; i++) {
-            if (all[clust][i] == cs.value ) {
-                all["c_alpha"].push(1);
-            } else {
-                all["c_alpha"].push(alpha);
-            };
-        };
-        
-        s1.change.emit()
-                                          
-                                          """))
-    
-    layout = gridplot([[p3, column(tb, alp, cluster_select)],[color_select, ]]) # 
-    
-    if path == None:
-        bio.output_file("../TSNE/Baseline_umap_%s.html" % (title), mode='inline')
-    else :
-        bio.output_file(path, mode='inline')
-    bio.show(layout)
-
-    print('\nUMAP figure saved under location: TSNE/Baseline_umap_%s.html' % (title))
-    return
