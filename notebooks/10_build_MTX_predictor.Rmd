@@ -9,13 +9,13 @@ Initialize working environment
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_knit$set(root.dir = "/exports/reum/tdmaarseveen/EHR-Clustering-RA")
+knitr::opts_knit$set(root.dir = "/exports/reum/tdmaarseveen/RA_Clustering")
 
 # Set library folder
 .libPaths("/exports/reum/tdmaarseveen/Rlibs")
 remove.packages("rlang", lib.loc = .libPaths()[x])
 
-setwd("/exports/reum/tdmaarseveen/EHR-Clustering-RA")
+setwd("/exports/reum/tdmaarseveen/RA_Clustering")
 getwd()
 ```
 
@@ -48,25 +48,47 @@ library("readr")
 library(reticulate)
 
 # Initalize conda environment w/ required python packages
-use_condaenv("convae_architecture/envs", required=TRUE)
-
+#use_condaenv("convae_architecture/envs", required=TRUE)
+# offshoots/IMPROVED/df_survivaldata_improved_Remission.csv
+# 5_clustering/df_survivaldata_mmae.csv
 # Import survival data (generate in #7.2.3 7_survival_analysis.ipynb)
-df_survival <- as.data.frame(read_csv("new_data/5_clustering/df_survivaldata_mmae.csv", col_types = cols(...1 = col_skip())))
+df_survival <- as.data.frame(read_csv("new_data/offshoots/IMPROVED/df_survivaldata_improved_Remission.csv", col_types = cols(...1 = col_skip())))
 head(df_survival)
 ```
+
+
 
 ### #2.2 Render Kaplan-Meier curve for 1 year
 ```{r}
 library(survival)
 library(survminer)
-library("ggpubr")       # for ggarrange
+library("ggpubr") #for ggarrange
 
 df_survival$aCCP <- as.integer(df_survival$aCCP)
 df_survival$Cluster <- as.factor(df_survival$Cluster)
 df_survival$time <- as.integer(df_survival$time) 
-df_survival$event_1y <- as.integer(df_survival$event_1y) 
+df_survival$event_1y_Rem <- as.integer(df_survival$event_1y_Rem) 
+#df_survival$event_1y <- as.integer(df_survival$event_1y) 
 df_survival$MannTillTreat <- as.integer(df_survival$MannTillTreat) 
 ```
+
+
+
+# Show added effect of clustering on top of ACPA-MTX interaction with an adjusted COX-regression for other covariates 
+```{r}
+library(survival)
+
+fit1 <- coxph(Surv(time, event_1y) ~ aCCP + RF + Age + Sex , data=df_survival)
+fit2 <- coxph(Surv(time, event_1y)~ Cluster + aCCP + RF + Age + Sex , data=df_survival) 
+
+anova(fit1,fit2,test="Chisq")
+```
+```{r}
+fit2 <- coxph(Surv(time, event_1y)~ Cluster + aCCP + RF + Age + Sex , data=df_survival) 
+fit2
+```
+
+# Visualize Kaplan Meier curves
 
 ```{r}
 

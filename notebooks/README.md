@@ -33,9 +33,13 @@
 - 7_survival_analysis.ipynb (Jupyter Notebook)
     This notebook performs survival analysis to assess the treatment response of the different clusters
     
-- 8_replication_EAC.ipynb (Jupyter Notebook)
-    This notebook is tasked w/ replicating our findings in historic data. It performs clustering
-    on an independent replication set, namely: EAC patients, that were included between 2004-2011. 
+- 8_replication_setB_IMPROVED.ipynb (Jupyter Notebook)
+    This notebook is tasked w/ replicating our findings in historic trial data. It performs clustering
+    on an independent replication set, namely: IMPROVED patients, that were included between 2007-2010.
+    
+- 8_replication_setC_RZWN.ipynb (Jupyter Notebook)
+    This notebook is tasked w/ replicating our findings in external hospital data. It performs clustering
+    on patients that visited any of the 9 hospitals affilitated with Reumazorg zuid west nederland (included between 2015-2022). 
     
 - 9_Treatment_analysis.ipynb (Jupyter Notebook)
     This notebook is tasked with visualizing the treatment exposure and DMARD failure / successes 
@@ -46,3 +50,7 @@
     also creates some nice visualizations for downstream analysis, like checking for 
     potential confounders (treating physician) as well as showing an overview of the missingness.
     
+- 11_Downstream_histopathological_analysis.ipynb (Jupyter Notebook)
+    This notebook is tasked w/ conducting a downstream analysis to examine if clusters correspond to different histopathological
+    features. This set includes patients from SYNGem Biopsy Unit cohort of the Fondazione Policlinico Universitario A.
+    Gemelli IRCCS–Università Cattolica del Sacro Cuore – Rome - Italy,

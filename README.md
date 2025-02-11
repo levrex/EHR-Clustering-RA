@@ -5,14 +5,14 @@ Therefore, we aim to refine the taxonomy of RA by "unlocking" the wealth of data
 
 ![alt text](https://github.com/levrex/EHR-Clustering-RA/blob/main/figures/md/fig3_SHAP_ClusterOverview.png?raw=true)
 
-Note: we used this pipeline for our study, of which you can find a preprint here: https://doi.org/10.1101/2023.09.19.23295482. We identified four different RA subsets: 1) arthritis in feet, 2) seropositive oligo-articular disease, 3) seronegative hand arthritis, 4) polyarthritis. We conducted sensitivity analysis, external validation and 1000 times bootstrapping to ensure that our clusters were valid, generalizable and stable.
+Note: we used this pipeline for our study, of which you can find a preprint here: https://doi.org/10.1101/2023.09.19.23295482. We identified four different RA subsets, characterized mainly by their Joint Involvement Patterns (*JIP*): JIP-foot) arthritis in feet, JIP-oligo) seropositive oligo-articular disease, JIP-hand) seronegative hand arthritis, JIP-poly) polyarthritis. We conducted sensitivity analysis, external validation and 1000 times bootstrapping to ensure that our clusters were valid, generalizable and stable.
 
 ## Workflow
 ![alt text](https://github.com/levrex/EHR-Clustering-RA/blob/main/figures/md/fig2_workflow.png?raw=true)
 
 Workflow depicting the different steps of our pipeline. We start off with 25,000+ dossiers of patients that visited the outpatient clinic, then we apply a patient selection whereby we request at a minimum follow-up of 1 year and a first visit after the initialization of our digital system in 2011. Next, we feed the conclusion section - containing the physician’s verdict - to a Machine Learning Method to identify the rheumatoid arthritis (RA) patients based on their diagnosis. We end up with the records of 1,387 RA-patients which are supplied to the EHR clustering pipeline, where we preprocess the different EHR-components and combine this information to construct a patient embedding with MMAE. We employ graph clustering (w/ PhenoGraph) on this feature space to stratify patients. The clusters were further analyzed with a SHAP analysis, to identify the signatures that drive the distinct clinical manifestions
 
-To ensure the robustness of our findings, we tested a) cluster stability (1000 fold) b) physician confounding, c) association with remission and methotrexate failure and d) generalizability to a second different data set (Leiden Early Arthritis clinic; n=769).
+To ensure the robustness of our findings, we tested a) cluster stability (1000 fold) b) physician confounding, c) association with remission and methotrexate failure, d) generalizability to independent data (historic trial n=307; external hospitals n=515), e) association with histopathological features (SYNgem cohort n=194).
 
 ### Replication in a second dataset
 We replicated the clustering and the downstream analysis (SHAP & survival analysis) in an seperate independent dataset for external validation. To investigate the replicability of the clustering we projected our novel patients unto our learned patient embedding, and assigned them to a cluster based on their orientation with respect to the old data. This projection was achieved with [POODLE](https://github.com/levrex/Poodle)
@@ -58,9 +58,11 @@ $ pip install -r requirements.txt
     evaluate the robustness of the clustering technique.
 * `notebooks/6_process_medication.ipynb`: Notebook that process the medication information
 * `notebooks/7_survival_analysis.ipynb`: Notebook that performs survival analysis to see if our clusters correspond to long term outcomes (MTX-discontinuation, Remission)
-* `notebooks/8_replication_setB.ipynb`: Notebook that processes & projects replication data. To see if our clusters are recurring in an independent data set.
+* `notebooks/8_replication_setB_IMPROVED.ipynb`: Notebook that processes & projects replication data from set B (historic trial). To see if our clusters are recurring in an independent data set.
+* `notebooks/8_replication_setB_RZWN.ipynb`: Notebook that processes & projects replication data from set C (external hospitals). To see if our clusters are recurring in independent data.
 * `notebooks/9_treatment_analysis.ipynb`: Notebook that checks for any noticeable differences in treatment response.
 * `notebooks/10_build_MTX_predictor.rmd`: R Markdown notebook to perform downstream analysis steps like: checking for Physican bias, global trend in treatment response and evaluating the quality of an MTX-success predictor 
+* `notebooks/11_Downstream_histopathological_analysis.ipynb`: Notebook that processes & projects data from set D (synovial tissue data from SYNGem cohort) to examine if clusters differ in histopathological features.
 * `notebooks/additional_steps/Compute_DAS.ipynb*`: Computes the disease activity scores based on the components, to counter the otherwise large missingness
 * `results/treatmentRespons`: Stores the OR for the different patients.
 * `sql/*`: Directory consisting of the different SQL-queries used to extract data from the Leiden EHR digital system (Excluded: sensitive data)
