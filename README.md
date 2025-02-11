@@ -3,19 +3,27 @@ Rheumatoid arthritis (RA) is an autoimmune disease that causes swelling and pain
 
 Therefore, we aim to refine the taxonomy of RA by "unlocking" the wealth of data available in the Electronic Health Records (EHR). We developed a pipeline that casts different EHR-layers, such as lab- and clinical- data, into a shared latent space and performs clustering accordingly. Next, we compare the baseline characteristics and treatment response between the clusters.
 
-![alt text](https://github.com/levrex/EHR-Clustering-RA/blob/main/figures/md/fig3_SHAP_ClusterOverview.png?raw=true)
-
-Note: we used this pipeline for our study, of which you can find a preprint here: https://doi.org/10.1101/2023.09.19.23295482. We identified four different RA subsets, characterized mainly by their Joint Involvement Patterns (*JIP*): JIP-foot) arthritis in feet, JIP-oligo) seropositive oligo-articular disease, JIP-hand) seronegative hand arthritis, JIP-poly) polyarthritis. We conducted sensitivity analysis, external validation and 1000 times bootstrapping to ensure that our clusters were valid, generalizable and stable.
 
 ## Workflow
 ![alt text](https://github.com/levrex/EHR-Clustering-RA/blob/main/figures/md/fig2_workflow.png?raw=true)
 
-Workflow depicting the different steps of our pipeline. We start off with 25,000+ dossiers of patients that visited the outpatient clinic, then we apply a patient selection whereby we request at a minimum follow-up of 1 year and a first visit after the initialization of our digital system in 2011. Next, we feed the conclusion section - containing the physician’s verdict - to a Machine Learning Method to identify the rheumatoid arthritis (RA) patients based on their diagnosis. We end up with the records of 1,387 RA-patients which are supplied to the EHR clustering pipeline, where we preprocess the different EHR-components and combine this information to construct a patient embedding with MMAE. We employ graph clustering (w/ PhenoGraph) on this feature space to stratify patients. The clusters were further analyzed with a SHAP analysis, to identify the signatures that drive the distinct clinical manifestions
+Our study consists of three distinct phases: i) developmental phase where we identify and validate subtypes in a discovery cohort (set A) based on long-term outcomes. ii) replication phase where cluster new patients using historical trial data (Set B) and external hospital data (Set C) to assess generalizability by replicating the treatment analysis, iii) downstream analysis where we examine differences between clusters in synovial tissue using external hospital data (set D).
+
+We preprocess  different EHR-components and combine this information to construct a patient embedding with MMAE. We employ graph clustering (w/ PhenoGraph) on this feature space to stratify patients. The clusters were further analyzed with a SHAP analysis, to identify the signatures that drive the distinct clinical manifestions
+
+### Preprint
+Note: we used this pipeline for our study, of which you can find a preprint here: https://doi.org/10.1101/2023.09.19.23295482. 
+
+### Joint involvement patterns (JIP)
+We identified four different RA subsets, characterized mainly by their Joint Involvement Patterns (**JIP**): JIP-foot) arthritis in feet, JIP-oligo) seropositive oligo-articular disease, JIP-hand) seronegative hand arthritis, JIP-poly) polyarthritis. We conducted sensitivity analysis, external validation and 1000 times bootstrapping to ensure that our clusters were valid, generalizable and stable.
+
+![alt text](https://github.com/levrex/EHR-Clustering-RA/blob/main/figures/md/fig3_SHAP_ClusterOverview.png?raw=true)
 
 To ensure the robustness of our findings, we tested a) cluster stability (1000 fold) b) physician confounding, c) association with remission and methotrexate failure, d) generalizability to independent data (historic trial n=307; external hospitals n=515), e) association with histopathological features (SYNgem cohort n=194).
 
-### Replication in a second dataset
-We replicated the clustering and the downstream analysis (SHAP & survival analysis) in an seperate independent dataset for external validation. To investigate the replicability of the clustering we projected our novel patients unto our learned patient embedding, and assigned them to a cluster based on their orientation with respect to the old data. This projection was achieved with [POODLE](https://github.com/levrex/Poodle)
+## Webtool
+This project provides a client-based webtool tool that classifies rheumatoid arthritis into four distinct phenotypes based on initial clinical presentation, that were primarily characterized by their unique joint involvement pattern (JIP): feet, oligoarticular, hand, and polyarticular distribution (credit: Nick Bos)
+[Click here to start clustering](https://knevel-lab.github.io/Rheumalyze/)
 
 ## Installation
 
@@ -70,6 +78,9 @@ $ pip install -r requirements.txt
 * `src/2_latent_space/*`: Scripts for creating the patient embedding with MMAE
 * `src/3_downstream/*`: Features scripts for downstream analysis like Bootstrapping or SHAP experiment
 * `TSNE/*`: The interactive TSNE plots are stored here (Blinded)
+
+### Replication in a second dataset
+We replicated the clustering and the downstream analysis (SHAP & survival analysis) in seperate independent datasets for external validation. To investigate the replicability of the clustering we projected our novel patients unto our learned patient embedding, and assigned them to a cluster based on their orientation with respect to the old data. This projection was achieved with [POODLE](https://github.com/levrex/Poodle)
 
 ## Contact
 If you experience difficulties with implementing the pipeline or if you have any other questions feel free to send me an e-mail. You can contact me on: t.d.maarseveen@lumc.nl
