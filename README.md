@@ -1,5 +1,5 @@
 # EHR-Clustering-RA
-Rheumatoid arthritis (RA) is an autoimmune disease that causes swelling and pain in the joints. As others, we reckon that RA is an heterogeneous disease and that subset identification is an important first step to a better etiologic understanding. A tantalizing idea is that the factors that cause this latent clinical heterogeneity are already present in patients at baseline.
+Rheumatoid arthritis (RA) is an autoimmune disease that causes swelling and pain in the joints. As others, we reckon that RA is an heterogeneous disease and that subset identification is an important first step to enable targeted therapy and a better etiologic understanding. A tantalizing idea is that the factors that cause this latent clinical heterogeneity are already present in patients at baseline.
 
 Therefore, we aim to refine the taxonomy of RA by "unlocking" the wealth of data available in the Electronic Health Records (EHR). We developed a pipeline that casts different EHR-layers, such as lab- and clinical- data, into a shared latent space and performs clustering accordingly. Next, we compare the baseline characteristics and treatment response between the clusters.
 
